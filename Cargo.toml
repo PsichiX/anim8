@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 homepage = "https://github.com/PsichiX/anim8"
 repository = "https://github.com/PsichiX/anim8"
 documentation = "https://docs.rs/anim8"
-readme = "../../README.md"
+readme = "README.md"
 
 [features]
 scalar64 = []
