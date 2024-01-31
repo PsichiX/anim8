@@ -214,6 +214,57 @@ where
         Self::linear(point.clone(), point)
     }
 
+    /// Builds smooth spline going through series of points.
+    ///
+    /// Uses Catmull-Rom method of finding valid tangents for spline smooth continuity.
+    pub fn smooth(points: &[T], strength: Scalar) -> Result<Self, SplineError> {
+        let points = (0..points.len())
+            .map(|index| {
+                let prev = if index == 0 {
+                    None
+                } else {
+                    Some(points[index - 1].clone())
+                };
+                let curr = points[index].clone();
+                let next = if index < points.len() - 1 {
+                    Some(points[index + 1].clone())
+                } else {
+                    None
+                };
+                match (prev, curr, next) {
+                    (None, a, None) => SplinePoint::point(a),
+                    (Some(a), b, None) => {
+                        let dir = a.delta(&b).scale(0.5 * strength);
+                        SplinePoint::new(b, SplinePointDirection::InOut(T::zero(), dir))
+                    }
+                    (None, a, Some(b)) => {
+                        let dir = a.delta(&b).scale(0.5 * strength);
+                        SplinePoint::new(a, SplinePointDirection::InOut(dir, T::zero()))
+                    }
+                    (Some(a), b, Some(c)) => {
+                        let dir_ab = a.delta(&b);
+                        let dir_bc = b.delta(&c);
+                        let len_ab = dir_ab.length();
+                        let len_bc = dir_bc.length();
+                        let tangent = dir_ab
+                            .normalize()
+                            .offset(&dir_bc.normalize())
+                            .negate()
+                            .scale(0.25);
+                        SplinePoint::new(
+                            b,
+                            SplinePointDirection::InOut(
+                                tangent.scale(len_ab * strength),
+                                tangent.scale(len_bc * strength),
+                            ),
+                        )
+                    }
+                }
+            })
+            .collect();
+        Self::new(points)
+    }
+
     /// Samples values along given axis in given number of steps.
     pub fn value_along_axis_iter(
         &self,

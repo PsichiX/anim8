@@ -20,6 +20,18 @@ pub trait Curved {
     fn get_axis(&self, index: usize) -> Option<Scalar>;
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self;
     fn is_valid(&self) -> bool;
+
+    fn normalize(&self) -> Self
+    where
+        Self: Sized,
+    {
+        let length = self.length();
+        if length > 0.0 {
+            self.inverse_scale(length)
+        } else {
+            Self::zero()
+        }
+    }
 }
 
 impl Curved for Scalar {
