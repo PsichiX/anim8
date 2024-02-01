@@ -7,6 +7,7 @@ use std::{
 };
 
 const EPSILON: Scalar = Scalar::EPSILON * 10.0;
+const NEWTON_RAPHASON_ITERATIONS: usize = 5;
 
 /// Curved trait gives an interface over Interpolated Bezier Curve.
 pub trait Curved {
@@ -477,7 +478,9 @@ where
 
     /// Builds linear curve with `from` same as `from_param` and `to` same as `to_param`.
     pub fn linear(from: T, to: T) -> Result<Self, CurveError> {
-        let mut result = Self::new_uninitialized(from.clone(), to.clone(), from, to)?;
+        let from_param = from.interpolate(&to, 1.0 / 3.0);
+        let to_param = from.interpolate(&to, 2.0 / 3.0);
+        let mut result = Self::new_uninitialized(from, from_param, to_param, to)?;
         result.recalculate_length();
         Ok(result)
     }
@@ -565,7 +568,7 @@ where
     /// Samples curve at given factor in <0; 1> range.
     #[allow(clippy::many_single_char_names)]
     pub fn sample(&self, mut factor: Scalar) -> T {
-        factor = factor.max(0.0).min(1.0);
+        factor = factor.clamp(0.0, 1.0);
         let a = self.from.interpolate(&self.from_param, factor);
         let b = self.from_param.interpolate(&self.to_param, factor);
         let c = self.to_param.interpolate(&self.to, factor);
@@ -582,7 +585,7 @@ where
 
     /// Samples velocity of change along the curve.
     pub fn sample_first_derivative(&self, mut factor: Scalar) -> T {
-        factor = factor.max(0.0).min(1.0);
+        factor = factor.clamp(0.0, 1.0);
         let a = self.from.delta(&self.from_param);
         let b = self.from_param.delta(&self.to_param);
         let c = self.to_param.delta(&self.to);
@@ -603,7 +606,7 @@ where
 
     /// Samples acceleration of change along the curve.
     pub fn sample_second_derivative(&self, mut factor: Scalar) -> T {
-        factor = factor.max(0.0).min(1.0);
+        factor = factor.clamp(0.0, 1.0);
         let a = self.from.delta(&self.from_param);
         let b = self.from_param.delta(&self.to_param);
         let c = self.to_param.delta(&self.to);
@@ -624,7 +627,7 @@ where
 
     /// Sample curve K value at given factor.
     pub fn sample_k(&self, mut factor: Scalar) -> Scalar {
-        factor = factor.max(0.0).min(1.0);
+        factor = factor.clamp(0.0, 1.0);
         let first = self.sample_first_derivative(factor);
         let second = self.sample_second_derivative(factor);
         second.length() / first.length().powf(1.5)
@@ -650,7 +653,7 @@ where
     }
 
     fn split_uninitialized(&self, mut factor: Scalar) -> Result<(Self, Self), CurveError> {
-        factor = factor.max(0.0).min(1.0);
+        factor = factor.clamp(0.0, 1.0);
         #[allow(clippy::manual_range_contains)]
         if factor < EPSILON || factor > 1.0 - EPSILON {
             return Err(CurveError::CannotSplit);
@@ -704,6 +707,41 @@ where
         a + b
     }
 
+    /// Finds distance along the curve for given time (factor).
+    pub fn find_distance_for_time(&self, factor: Scalar) -> Scalar {
+        self.split_uninitialized(factor)
+            .map(|(mut curve, _)| {
+                curve.recalculate_length();
+                curve.length
+            })
+            .unwrap_or_else(|_| if factor < 0.5 { 0.0 } else { self.length })
+    }
+
+    /// Finds time (factor) for given distance along the curve.
+    pub fn find_time_for_distance(&self, mut distance: Scalar) -> Scalar {
+        if self.length < EPSILON {
+            return 0.0;
+        }
+        distance = distance.clamp(0.0, self.length);
+        let mut guess = distance;
+        let mut last_tangent = None;
+        for _ in 0..NEWTON_RAPHASON_ITERATIONS {
+            let dv = self.find_distance_for_time(guess / self.length) - distance;
+            if dv.abs() < EPSILON {
+                return guess / self.length;
+            }
+            let tangent = self.sample_tangent(guess / self.length);
+            let slope = if let Some(last_tangent) = last_tangent {
+                tangent.dot(&last_tangent)
+            } else {
+                1.0
+            };
+            last_tangent = Some(tangent);
+            guess -= dv * slope;
+        }
+        guess / self.length
+    }
+
     /// Finds time (factor) for given axis value.
     pub fn find_time_for_axis(&self, mut axis_value: Scalar, axis_index: usize) -> Option<Scalar> {
         let min = self.from.get_axis(axis_index)?;
@@ -712,10 +750,10 @@ where
         if dist.abs() < EPSILON {
             return Some(1.0);
         }
-        axis_value = axis_value.max(min).min(max);
+        axis_value = axis_value.clamp(min, max);
         let mut guess = (axis_value - min) / dist;
         let mut last_tangent = None;
-        for _ in 0..5 {
+        for _ in 0..NEWTON_RAPHASON_ITERATIONS {
             let dv = self.sample(guess).get_axis(axis_index)? - axis_value;
             if dv.abs() < EPSILON {
                 return Some(guess);

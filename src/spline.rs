@@ -138,7 +138,7 @@ where
     points: Vec<SplinePoint<T>>,
     cached: Vec<Curve<T>>,
     length: Scalar,
-    parts_times_values: Vec<(Scalar, T)>,
+    points_distances_values: Vec<(Scalar, T)>,
 }
 
 impl<T> Default for Spline<T>
@@ -189,18 +189,18 @@ where
             .iter()
             .map(|curve| curve.length())
             .collect::<Vec<_>>();
-        let mut time = 0.0;
-        let mut parts_times_values = Vec::with_capacity(points.len());
-        parts_times_values.push((0.0, points[0].point.clone()));
+        let mut distance = 0.0;
+        let mut points_distances_values = Vec::with_capacity(points.len());
+        points_distances_values.push((0.0, points[0].point.clone()));
         for (length, point) in lengths.iter().zip(points.iter().skip(1)) {
-            time += length;
-            parts_times_values.push((time, point.point.clone()));
+            distance += length;
+            points_distances_values.push((distance, point.point.clone()));
         }
         Ok(Self {
             points,
             cached,
-            length: time,
-            parts_times_values,
+            length: distance,
+            points_distances_values,
         })
     }
 
@@ -278,7 +278,7 @@ where
 
     /// Samples spline at given factor in <0; 1> range.
     pub fn sample(&self, factor: Scalar) -> T {
-        let (index, factor) = self.find_curve_index_factor(factor);
+        let (index, _, factor) = self.find_curve_index_offset_factor(factor);
         self.cached[index].sample(factor)
     }
 
@@ -290,7 +290,7 @@ where
 
     /// Samples velocity of change along the spline.
     pub fn sample_first_derivative(&self, factor: Scalar) -> T {
-        let (index, factor) = self.find_curve_index_factor(factor);
+        let (index, _, factor) = self.find_curve_index_offset_factor(factor);
         self.cached[index].sample_first_derivative(factor)
     }
 
@@ -306,7 +306,7 @@ where
 
     /// Samples acceleration of change along the spline.
     pub fn sample_second_derivative(&self, factor: Scalar) -> T {
-        let (index, factor) = self.find_curve_index_factor(factor);
+        let (index, _, factor) = self.find_curve_index_offset_factor(factor);
         self.cached[index].sample_second_derivative(factor)
     }
 
@@ -322,19 +322,19 @@ where
 
     /// Sample spline K value at given factor.
     pub fn sample_k(&self, factor: Scalar) -> Scalar {
-        let (index, factor) = self.find_curve_index_factor(factor);
+        let (index, _, factor) = self.find_curve_index_offset_factor(factor);
         self.cached[index].sample_k(factor)
     }
 
     /// Sample curvature radius at given factor.
     pub fn sample_curvature_radius(&self, factor: Scalar) -> Scalar {
-        let (index, factor) = self.find_curve_index_factor(factor);
+        let (index, _, factor) = self.find_curve_index_offset_factor(factor);
         self.cached[index].sample_curvature_radius(factor)
     }
 
     /// Sample spline tangent at given factor.
     pub fn sample_tangent(&self, factor: Scalar) -> T {
-        let (index, factor) = self.find_curve_index_factor(factor);
+        let (index, _, factor) = self.find_curve_index_offset_factor(factor);
         self.cached[index].sample_tangent(factor)
     }
 
@@ -366,26 +366,14 @@ where
         &self.cached
     }
 
-    /// Finds curve index of this spline at given factor.
-    pub fn find_curve_index_factor(&self, mut factor: Scalar) -> (usize, Scalar) {
-        factor = factor.max(0.0).min(1.0);
-        let t = factor * self.length;
-        let index = match self
-            .parts_times_values
-            .binary_search_by(|(time, _)| time.partial_cmp(&t).unwrap())
-        {
-            Ok(index) => index,
-            Err(index) => index.saturating_sub(1),
-        };
-        let index = index.min(self.cached.len().saturating_sub(1));
-        let start = self.parts_times_values[index].0;
-        let length = self.parts_times_values[index + 1].0 - start;
-        let factor = if length > 0.0 {
-            (t - start) / length
-        } else {
-            1.0
-        };
-        (index, factor)
+    /// Finds curve index, distance offset and factor (time) of this spline at given factor.
+    pub fn find_curve_index_offset_factor(&self, mut factor: Scalar) -> (usize, Scalar, Scalar) {
+        factor = factor.clamp(0.0, 1.0);
+        let key = factor * self.cached.len() as Scalar;
+        let index = (key as usize).min(self.cached.len().saturating_sub(1));
+        let offset = self.points_distances_values[index].0;
+        let factor = (key - index as Scalar).clamp(0.0, 1.0);
+        (index, offset, factor)
     }
 
     /// Finds curve index of this spline at given axis value.
@@ -396,8 +384,8 @@ where
     ) -> Option<usize> {
         let min = self.points.first().unwrap().point.get_axis(axis_index)?;
         let max = self.points.last().unwrap().point.get_axis(axis_index)?;
-        axis_value = axis_value.max(min).min(max);
-        let index = match self.parts_times_values.binary_search_by(|(_, value)| {
+        axis_value = axis_value.clamp(min, max);
+        let index = match self.points_distances_values.binary_search_by(|(_, value)| {
             value
                 .get_axis(axis_index)
                 .unwrap()
@@ -410,13 +398,33 @@ where
         Some(index.min(self.cached.len().saturating_sub(1)))
     }
 
+    /// Finds distance along the spline for given time (factor).
+    pub fn find_distance_for_time(&self, factor: Scalar) -> Scalar {
+        let (index, offset, factor) = self.find_curve_index_offset_factor(factor);
+        self.cached[index].find_distance_for_time(factor) + offset
+    }
+
+    /// Finds time (factor) for given distance along the spline.
+    pub fn find_time_for_distance(&self, mut distance: Scalar) -> Scalar {
+        distance = distance.clamp(0.0, self.length);
+        let index = match self
+            .points_distances_values
+            .binary_search_by(|(d, _)| d.partial_cmp(&distance).unwrap())
+        {
+            Ok(index) => index,
+            Err(index) => index.saturating_sub(1),
+        };
+        let index = index.min(self.cached.len().saturating_sub(1));
+        let start = self.points_distances_values[index].0;
+        let factor = self.cached[index].find_time_for_distance(distance - start);
+        (index as Scalar + factor) / self.cached.len() as Scalar
+    }
+
     /// Finds time (factor) for given axis value.
     pub fn find_time_for_axis(&self, axis_value: Scalar, axis_index: usize) -> Option<Scalar> {
         let index = self.find_curve_index_by_axis_value(axis_value, axis_index)?;
         self.cached[index].find_time_for_axis(axis_value, axis_index)
     }
-
-    // TODO: find_time_for()
 }
 
 impl<T> TryFrom<SplineDef<T>> for Spline<T>
