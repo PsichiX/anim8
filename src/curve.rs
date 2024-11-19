@@ -129,6 +129,60 @@ impl Curved for (Scalar, Scalar) {
     }
 }
 
+impl Curved for (Scalar, Scalar, Scalar) {
+    fn zero() -> Self {
+        (0.0, 0.0, 0.0)
+    }
+
+    fn one() -> Self {
+        (1.0, 1.0, 1.0)
+    }
+
+    fn negate(&self) -> Self {
+        (-self.0, -self.1, -self.2)
+    }
+
+    fn scale(&self, value: Scalar) -> Self {
+        (self.0 * value, self.1 * value, self.2 * value)
+    }
+
+    fn inverse_scale(&self, value: Scalar) -> Self {
+        (self.0 / value, self.1 / value, self.2 / value)
+    }
+
+    fn length(&self) -> Scalar {
+        self.length_squared().sqrt()
+    }
+
+    fn length_squared(&self) -> Scalar {
+        self.0 * self.0 + self.1 * self.1 + self.2 * self.2
+    }
+
+    fn get_axis(&self, index: usize) -> Option<Scalar> {
+        match index {
+            0 => Some(self.0),
+            1 => Some(self.1),
+            2 => Some(self.2),
+            _ => None,
+        }
+    }
+
+    fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
+        let diff0 = other.0 - self.0;
+        let diff1 = other.1 - self.1;
+        let diff2 = other.2 - self.2;
+        (
+            diff0 * factor + self.0,
+            diff1 * factor + self.1,
+            diff2 * factor + self.2,
+        )
+    }
+
+    fn is_valid(&self) -> bool {
+        self.0.is_valid() && self.1.is_valid() && self.2.is_valid()
+    }
+}
+
 impl Curved for [Scalar; 2] {
     fn zero() -> Self {
         [0.0, 0.0]
@@ -174,6 +228,60 @@ impl Curved for [Scalar; 2] {
 
     fn is_valid(&self) -> bool {
         self[0].is_valid() && self[1].is_valid()
+    }
+}
+
+impl Curved for [Scalar; 3] {
+    fn zero() -> Self {
+        [0.0, 0.0, 0.0]
+    }
+
+    fn one() -> Self {
+        [1.0, 1.0, 1.0]
+    }
+
+    fn negate(&self) -> Self {
+        [-self[0], -self[1], self[2]]
+    }
+
+    fn scale(&self, value: Scalar) -> Self {
+        [self[0] * value, self[1] * value, self[2] * value]
+    }
+
+    fn inverse_scale(&self, value: Scalar) -> Self {
+        [self[0] / value, self[1] / value, self[2] / value]
+    }
+
+    fn length(&self) -> Scalar {
+        self.length_squared().sqrt()
+    }
+
+    fn length_squared(&self) -> Scalar {
+        self[0] * self[0] + self[1] * self[1] + self[2] * self[2]
+    }
+
+    fn get_axis(&self, index: usize) -> Option<Scalar> {
+        match index {
+            0 => Some(self[0]),
+            1 => Some(self[1]),
+            2 => Some(self[2]),
+            _ => None,
+        }
+    }
+
+    fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
+        let diff0 = other[0] - self[0];
+        let diff1 = other[1] - self[1];
+        let diff2 = other[2] - self[2];
+        [
+            diff0 * factor + self[0],
+            diff1 * factor + self[1],
+            diff2 * factor + self[2],
+        ]
+    }
+
+    fn is_valid(&self) -> bool {
+        self[0].is_valid() && self[1].is_valid() && self[2].is_valid()
     }
 }
 
@@ -294,6 +402,20 @@ impl CurvedChange for (Scalar, Scalar) {
     }
 }
 
+impl CurvedChange for (Scalar, Scalar, Scalar) {
+    fn offset(&self, other: &Self) -> Self {
+        (self.0 + other.0, self.1 + other.1, self.2 + other.2)
+    }
+
+    fn delta(&self, other: &Self) -> Self {
+        (other.0 - self.0, other.1 - self.1, other.2 - self.2)
+    }
+
+    fn dot(&self, other: &Self) -> Scalar {
+        self.0 * other.0 + self.1 * other.1 + self.2 * other.2
+    }
+}
+
 impl CurvedChange for [Scalar; 2] {
     fn offset(&self, other: &Self) -> Self {
         [self[0] + other[0], self[1] + other[1]]
@@ -305,6 +427,20 @@ impl CurvedChange for [Scalar; 2] {
 
     fn dot(&self, other: &Self) -> Scalar {
         self[0] * other[0] + self[1] * other[1]
+    }
+}
+
+impl CurvedChange for [Scalar; 3] {
+    fn offset(&self, other: &Self) -> Self {
+        [self[0] + other[0], self[1] + other[1], self[2] + other[2]]
+    }
+
+    fn delta(&self, other: &Self) -> Self {
+        [other[0] - self[0], other[1] - self[1], other[2] - self[2]]
+    }
+
+    fn dot(&self, other: &Self) -> Scalar {
+        self[0] * other[0] + self[1] * other[1] + self[2] * other[2]
     }
 }
 
