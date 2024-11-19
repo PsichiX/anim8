@@ -200,6 +200,12 @@ impl Phase {
         time = time.max(self.time_frame.start).min(self.time_frame.end);
         self.spline.sample_along_axis(time, 0).unwrap().1
     }
+
+    /// Sample animation phase tangent at given time.
+    pub fn sample_slope(&self, mut time: Scalar) -> Scalar {
+        time = time.max(self.time_frame.start).min(self.time_frame.end);
+        self.spline.sample_tangent_along_axis(time, 0).unwrap().1
+    }
 }
 
 impl TryFrom<PhaseDef> for Phase {
