@@ -6,6 +6,8 @@ use crate::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::convert::TryFrom;
 
+const EPSILON: Scalar = Scalar::EPSILON * 10.0;
+
 /// Defines spline point direction.
 ///
 /// You can think of it as tangent vectors.
@@ -433,6 +435,43 @@ where
     pub fn find_time_for_axis(&self, axis_value: Scalar, axis_index: usize) -> Option<Scalar> {
         let index = self.find_curve_index_by_axis_value(axis_value, axis_index)?;
         self.cached[index].find_time_for_axis(axis_value, axis_index)
+    }
+
+    /// Finds best time (factor) for given estimate (guess) using provided function to iteratively
+    /// calculate new estimate (guess) until reaches number of iterations or derivative gets close
+    /// to no change. Usually used for Newton-Raphson method of estimation.
+    pub fn find_time_for(
+        &self,
+        mut guess: Scalar,
+        iterations: usize,
+        mut f: impl FnMut(Scalar, &Self) -> Scalar,
+    ) -> Scalar {
+        guess = guess.clamp(0.0, 1.0);
+        for _ in 0..iterations {
+            let time = f(guess, self);
+            if (time - guess).abs() < EPSILON {
+                return time;
+            }
+            guess = time;
+        }
+        guess
+    }
+
+    /// Finds time (factor) closest to given point.
+    /// Returns tuple of: (time, distance)
+    pub fn find_time_closest_to_point(&self, point: &T) -> (Scalar, Scalar) {
+        self.cached
+            .iter()
+            .map(|curve| curve.find_time_closest_to_point(point))
+            .enumerate()
+            .min_by(|(_, (_, a)), (_, (_, b))| a.partial_cmp(b).unwrap())
+            .map(|(index, (factor, dist))| {
+                (
+                    (index as Scalar + factor) / self.cached.len() as Scalar,
+                    dist,
+                )
+            })
+            .unwrap()
     }
 }
 

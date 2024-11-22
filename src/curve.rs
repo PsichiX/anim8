@@ -7,7 +7,7 @@ use std::{
 };
 
 const EPSILON: Scalar = Scalar::EPSILON * 10.0;
-const NEWTON_RAPHASON_ITERATIONS: usize = 5;
+const NEWTON_RAPHSON_ITERATIONS: usize = 7;
 
 /// Curved trait gives an interface over Interpolated Bezier Curve.
 pub trait Curved {
@@ -386,6 +386,20 @@ pub trait CurvedChange {
     fn offset(&self, other: &Self) -> Self;
     fn delta(&self, other: &Self) -> Self;
     fn dot(&self, other: &Self) -> Scalar;
+}
+
+impl CurvedChange for Scalar {
+    fn offset(&self, other: &Self) -> Self {
+        self + other
+    }
+
+    fn delta(&self, other: &Self) -> Self {
+        other - self
+    }
+
+    fn dot(&self, other: &Self) -> Scalar {
+        self * other
+    }
 }
 
 impl CurvedChange for (Scalar, Scalar) {
@@ -861,7 +875,7 @@ where
         distance = distance.clamp(0.0, self.length);
         let mut guess = distance;
         let mut last_tangent = None;
-        for _ in 0..NEWTON_RAPHASON_ITERATIONS {
+        for _ in 0..NEWTON_RAPHSON_ITERATIONS {
             let dv = self.find_distance_for_time(guess / self.length) - distance;
             if dv.abs() < EPSILON {
                 return guess / self.length;
@@ -889,7 +903,7 @@ where
         axis_value = axis_value.clamp(min, max);
         let mut guess = (axis_value - min) / dist;
         let mut last_tangent = None;
-        for _ in 0..NEWTON_RAPHASON_ITERATIONS {
+        for _ in 0..NEWTON_RAPHSON_ITERATIONS {
             let dv = self.sample(guess).get_axis(axis_index)? - axis_value;
             if dv.abs() < EPSILON {
                 return Some(guess);
@@ -924,5 +938,43 @@ where
             guess = time;
         }
         guess
+    }
+
+    /// Finds time (factor) closest to given point.
+    /// Returns tuple of: (time, distance)
+    pub fn find_time_closest_to_point(&self, point: &T) -> (Scalar, Scalar) {
+        let change = |time| {
+            let p = self.sample(time);
+            let diff = point.delta(&p);
+            let d1 = self.sample_first_derivative(time);
+            let d2 = self.sample_second_derivative(time);
+            let d1_sqr = d1.dot(&d1);
+            let c = diff.dot(&d2);
+            let fitness = 2.0 * diff.dot(&d1);
+            let fitness_derivative = 2.0 * (d1_sqr + c);
+            (fitness, fitness_derivative)
+        };
+        let mut guess = 0.5;
+        let mut lowest_distance = Scalar::INFINITY;
+        for _ in 0..NEWTON_RAPHSON_ITERATIONS {
+            let (fitness, fitness_derivative) = change(guess);
+            if fitness.abs() < EPSILON {
+                break;
+            }
+            if fitness_derivative.abs() < EPSILON {
+                break;
+            }
+            let time = (guess - fitness / fitness_derivative).clamp(0.0, 1.0);
+            if (guess - time).abs() < EPSILON {
+                break;
+            }
+            let distance = self.sample(time).delta(point).length();
+            if distance > lowest_distance {
+                break;
+            }
+            guess = time;
+            lowest_distance = distance;
+        }
+        (guess, self.sample(guess).delta(point).length())
     }
 }
