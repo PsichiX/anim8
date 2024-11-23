@@ -6,7 +6,7 @@ pub mod transition;
 pub mod utils;
 
 pub mod prelude {
-    pub use crate::{animation::*, curve::*, phase::*, spline::*, transition::*, utils::*};
+    pub use crate::{animation::*, curve::*, phase::*, spline::*, transition::*, utils::*, Scalar};
 }
 
 /// Scalar number type.

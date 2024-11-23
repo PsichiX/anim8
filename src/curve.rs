@@ -8,6 +8,7 @@ use std::{
 
 const EPSILON: Scalar = Scalar::EPSILON * 10.0;
 const NEWTON_RAPHSON_ITERATIONS: usize = 7;
+const ARC_LENGTH_ITERATIONS: usize = 5;
 
 /// Curved trait gives an interface over Interpolated Bezier Curve.
 pub trait Curved {
@@ -837,7 +838,7 @@ where
     }
 
     fn arc_length(&self, threshold: Scalar) -> Scalar {
-        self.arc_length_inner(self.estimate_arc_length(), threshold, 5)
+        self.arc_length_inner(self.estimate_arc_length(), threshold, ARC_LENGTH_ITERATIONS)
     }
 
     fn arc_length_inner(&self, estimation: Scalar, threshold: Scalar, levels: usize) -> Scalar {
@@ -873,23 +874,16 @@ where
             return 0.0;
         }
         distance = distance.clamp(0.0, self.length);
-        let mut guess = distance;
-        let mut last_tangent = None;
-        for _ in 0..NEWTON_RAPHSON_ITERATIONS {
-            let dv = self.find_distance_for_time(guess / self.length) - distance;
-            if dv.abs() < EPSILON {
-                return guess / self.length;
-            }
-            let tangent = self.sample_tangent(guess / self.length);
-            let slope = if let Some(last_tangent) = last_tangent {
-                tangent.dot(&last_tangent)
-            } else {
-                1.0
-            };
-            last_tangent = Some(tangent);
-            guess -= dv * slope;
-        }
-        guess / self.length
+        self.find_time_for(
+            None,
+            None,
+            |time| {
+                let dv = self.find_distance_for_time(time) - distance;
+                let tangent = self.sample_tangent(time);
+                Some(tangent.scale(dv))
+            },
+            |_| true,
+        )
     }
 
     /// Finds time (factor) for given axis value.
@@ -901,63 +895,65 @@ where
             return Some(1.0);
         }
         axis_value = axis_value.clamp(min, max);
-        let mut guess = (axis_value - min) / dist;
-        let mut last_tangent = None;
-        for _ in 0..NEWTON_RAPHSON_ITERATIONS {
-            let dv = self.sample(guess).get_axis(axis_index)? - axis_value;
-            if dv.abs() < EPSILON {
-                return Some(guess);
-            }
-            let tangent = self.sample_tangent(guess);
-            let slope = if let Some(last_tangent) = last_tangent {
-                tangent.dot(&last_tangent)
-            } else {
-                1.0
-            };
-            last_tangent = Some(tangent);
-            guess -= dv * slope;
-        }
-        Some(guess)
-    }
-
-    /// Finds best time (factor) for given estimate (guess) using provided function to iteratively
-    /// calculate new estimate (guess) until reaches number of iterations or derivative gets close
-    /// to no change. Usually used for Newton-Raphson method of estimation.
-    pub fn find_time_for(
-        &self,
-        mut guess: Scalar,
-        iterations: usize,
-        mut f: impl FnMut(Scalar, &Self) -> Scalar,
-    ) -> Scalar {
-        guess = guess.clamp(0.0, 1.0);
-        for _ in 0..iterations {
-            let time = f(guess, self);
-            if (time - guess).abs() < EPSILON {
-                return time;
-            }
-            guess = time;
-        }
-        guess
+        Some(self.find_time_for(
+            None,
+            None,
+            |time| {
+                let dv = self.sample(time).get_axis(axis_index)? - axis_value;
+                let tangent = self.sample_tangent(time);
+                Some(tangent.scale(dv))
+            },
+            |_| true,
+        ))
     }
 
     /// Finds time (factor) closest to given point.
     /// Returns tuple of: (time, distance)
     pub fn find_time_closest_to_point(&self, point: &T) -> (Scalar, Scalar) {
-        let change = |time| {
-            let p = self.sample(time);
-            let diff = point.delta(&p);
+        let mut lowest_distance = Scalar::INFINITY;
+        let time = self.find_time_for(
+            None,
+            None,
+            |time| Some(point.delta(&self.sample(time))),
+            |time| {
+                let distance = self.sample(time).delta(point).length();
+                if distance < lowest_distance {
+                    lowest_distance = distance;
+                    true
+                } else {
+                    false
+                }
+            },
+        );
+        (time, self.sample(time).delta(point).length())
+    }
+
+    /// Finds best time (factor) for given estimate (guess) using provided function to
+    /// calculate change in hidden value, until reaches number of iterations or derivative
+    /// gets close to no change. Usually used for Newton-Raphson method of approximation.
+    pub fn find_time_for(
+        &self,
+        guess: Option<Scalar>,
+        iterations: Option<usize>,
+        mut difference: impl FnMut(Scalar) -> Option<T>,
+        mut validation: impl FnMut(Scalar) -> bool,
+    ) -> Scalar {
+        let mut change = |time| {
+            let diff = difference(time)?;
             let d1 = self.sample_first_derivative(time);
             let d2 = self.sample_second_derivative(time);
             let d1_sqr = d1.dot(&d1);
             let c = diff.dot(&d2);
             let fitness = 2.0 * diff.dot(&d1);
             let fitness_derivative = 2.0 * (d1_sqr + c);
-            (fitness, fitness_derivative)
+            Some((fitness, fitness_derivative))
         };
-        let mut guess = 0.5;
-        let mut lowest_distance = Scalar::INFINITY;
-        for _ in 0..NEWTON_RAPHSON_ITERATIONS {
-            let (fitness, fitness_derivative) = change(guess);
+        let mut guess = guess.unwrap_or(0.5).clamp(0.0, 1.0);
+        let iterations = iterations.unwrap_or(NEWTON_RAPHSON_ITERATIONS);
+        for _ in 0..iterations {
+            let Some((fitness, fitness_derivative)) = change(guess) else {
+                break;
+            };
             if fitness.abs() < EPSILON {
                 break;
             }
@@ -968,13 +964,50 @@ where
             if (guess - time).abs() < EPSILON {
                 break;
             }
-            let distance = self.sample(time).delta(point).length();
-            if distance > lowest_distance {
+            if !validation(time) {
                 break;
             }
             guess = time;
-            lowest_distance = distance;
         }
-        (guess, self.sample(guess).delta(point).length())
+        guess
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::factor_iter;
+
+    #[test]
+    fn test_curve_approximation() {
+        let curve = Curve::bezier((0.0, 0.0), (100.0, 0.0), (0.0, 100.0), (100.0, 100.0)).unwrap();
+
+        for x in factor_iter(100) {
+            let time = curve.find_time_for_axis(x, 0).unwrap();
+            let sample = curve.sample(time);
+            let diff = (sample.0 - x).abs();
+            assert!(
+                diff < 1.0e-3,
+                "x: {} | time: {} | sample: {:?} | difference: {}",
+                x,
+                time,
+                sample,
+                diff
+            );
+        }
+
+        for time in factor_iter(100) {
+            let distance = curve.find_distance_for_time(time);
+            let sample = curve.find_time_for_distance(distance);
+            let diff = (sample - time).abs();
+            assert!(
+                diff < 1.0e-3,
+                "time: {} | distance: {} | sample: {:?} | difference: {}",
+                time,
+                distance,
+                sample,
+                diff
+            );
+        }
     }
 }
