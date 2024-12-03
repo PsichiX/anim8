@@ -20,6 +20,8 @@ pub trait Curved {
     fn length(&self) -> Scalar;
     fn length_squared(&self) -> Scalar;
     fn get_axis(&self, index: usize) -> Option<Scalar>;
+    fn set_axis(&mut self, index: usize, value: Scalar);
+    fn count_axes(&self) -> usize;
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self;
     fn is_valid(&self) -> bool;
 
@@ -33,6 +35,13 @@ pub trait Curved {
         } else {
             Self::zero()
         }
+    }
+
+    fn perpendicular(&self, _guide: Option<&Self>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        None
     }
 }
 
@@ -70,6 +79,16 @@ impl Curved for Scalar {
             0 => Some(*self),
             _ => None,
         }
+    }
+
+    fn set_axis(&mut self, index: usize, value: Scalar) {
+        if index == 0 {
+            *self = value;
+        }
+    }
+
+    fn count_axes(&self) -> usize {
+        1
     }
 
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
@@ -119,6 +138,22 @@ impl Curved for (Scalar, Scalar) {
         }
     }
 
+    fn set_axis(&mut self, index: usize, value: Scalar) {
+        match index {
+            0 => {
+                self.0 = value;
+            }
+            1 => {
+                self.1 = value;
+            }
+            _ => {}
+        }
+    }
+
+    fn count_axes(&self) -> usize {
+        2
+    }
+
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let diff0 = other.0 - self.0;
         let diff1 = other.1 - self.1;
@@ -127,6 +162,84 @@ impl Curved for (Scalar, Scalar) {
 
     fn is_valid(&self) -> bool {
         self.0.is_valid() && self.1.is_valid()
+    }
+
+    fn perpendicular(&self, _guide: Option<&Self>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        Some((self.1, -self.0))
+    }
+}
+
+impl Curved for [Scalar; 2] {
+    fn zero() -> Self {
+        [0.0, 0.0]
+    }
+
+    fn one() -> Self {
+        [1.0, 1.0]
+    }
+
+    fn negate(&self) -> Self {
+        [-self[0], -self[1]]
+    }
+
+    fn scale(&self, value: Scalar) -> Self {
+        [self[0] * value, self[1] * value]
+    }
+
+    fn inverse_scale(&self, value: Scalar) -> Self {
+        [self[0] / value, self[1] / value]
+    }
+
+    fn length(&self) -> Scalar {
+        self.length_squared().sqrt()
+    }
+
+    fn length_squared(&self) -> Scalar {
+        self[0] * self[0] + self[1] * self[1]
+    }
+
+    fn get_axis(&self, index: usize) -> Option<Scalar> {
+        match index {
+            0 => Some(self[0]),
+            1 => Some(self[1]),
+            _ => None,
+        }
+    }
+
+    fn set_axis(&mut self, index: usize, value: Scalar) {
+        match index {
+            0 => {
+                self[0] = value;
+            }
+            1 => {
+                self[1] = value;
+            }
+            _ => {}
+        }
+    }
+
+    fn count_axes(&self) -> usize {
+        2
+    }
+
+    fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
+        let diff0 = other[0] - self[0];
+        let diff1 = other[1] - self[1];
+        [diff0 * factor + self[0], diff1 * factor + self[1]]
+    }
+
+    fn is_valid(&self) -> bool {
+        self[0].is_valid() && self[1].is_valid()
+    }
+
+    fn perpendicular(&self, _guide: Option<&Self>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        Some([self[1], -self[0]])
     }
 }
 
@@ -168,6 +281,25 @@ impl Curved for (Scalar, Scalar, Scalar) {
         }
     }
 
+    fn set_axis(&mut self, index: usize, value: Scalar) {
+        match index {
+            0 => {
+                self.0 = value;
+            }
+            1 => {
+                self.1 = value;
+            }
+            2 => {
+                self.2 = value;
+            }
+            _ => {}
+        }
+    }
+
+    fn count_axes(&self) -> usize {
+        3
+    }
+
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let diff0 = other.0 - self.0;
         let diff1 = other.1 - self.1;
@@ -182,53 +314,17 @@ impl Curved for (Scalar, Scalar, Scalar) {
     fn is_valid(&self) -> bool {
         self.0.is_valid() && self.1.is_valid() && self.2.is_valid()
     }
-}
 
-impl Curved for [Scalar; 2] {
-    fn zero() -> Self {
-        [0.0, 0.0]
-    }
-
-    fn one() -> Self {
-        [1.0, 1.0]
-    }
-
-    fn negate(&self) -> Self {
-        [-self[0], -self[1]]
-    }
-
-    fn scale(&self, value: Scalar) -> Self {
-        [self[0] * value, self[1] * value]
-    }
-
-    fn inverse_scale(&self, value: Scalar) -> Self {
-        [self[0] / value, self[1] / value]
-    }
-
-    fn length(&self) -> Scalar {
-        self.length_squared().sqrt()
-    }
-
-    fn length_squared(&self) -> Scalar {
-        self[0] * self[0] + self[1] * self[1]
-    }
-
-    fn get_axis(&self, index: usize) -> Option<Scalar> {
-        match index {
-            0 => Some(self[0]),
-            1 => Some(self[1]),
-            _ => None,
-        }
-    }
-
-    fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
-        let diff0 = other[0] - self[0];
-        let diff1 = other[1] - self[1];
-        [diff0 * factor + self[0], diff1 * factor + self[1]]
-    }
-
-    fn is_valid(&self) -> bool {
-        self[0].is_valid() && self[1].is_valid()
+    fn perpendicular(&self, guide: Option<&Self>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        let guide = guide?;
+        Some((
+            (self.1 * guide.2) - (self.2 * guide.1),
+            (self.2 * guide.0) - (self.0 * guide.2),
+            (self.0 * guide.1) - (self.1 * guide.0),
+        ))
     }
 }
 
@@ -270,6 +366,25 @@ impl Curved for [Scalar; 3] {
         }
     }
 
+    fn set_axis(&mut self, index: usize, value: Scalar) {
+        match index {
+            0 => {
+                self[0] = value;
+            }
+            1 => {
+                self[1] = value;
+            }
+            2 => {
+                self[2] = value;
+            }
+            _ => {}
+        }
+    }
+
+    fn count_axes(&self) -> usize {
+        3
+    }
+
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let diff0 = other[0] - self[0];
         let diff1 = other[1] - self[1];
@@ -283,6 +398,18 @@ impl Curved for [Scalar; 3] {
 
     fn is_valid(&self) -> bool {
         self[0].is_valid() && self[1].is_valid() && self[2].is_valid()
+    }
+
+    fn perpendicular(&self, guide: Option<&Self>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        let guide = guide?;
+        Some([
+            (self[1] * guide[2]) - (self[2] * guide[1]),
+            (self[2] * guide[0]) - (self[0] * guide[2]),
+            (self[0] * guide[1]) - (self[1] * guide[0]),
+        ])
     }
 }
 
@@ -322,6 +449,14 @@ where
         self.borrow().get_axis(index)
     }
 
+    fn set_axis(&mut self, index: usize, value: Scalar) {
+        self.borrow_mut().set_axis(index, value);
+    }
+
+    fn count_axes(&self) -> usize {
+        self.borrow().count_axes()
+    }
+
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let from: &T = &self.borrow();
         let to: &T = &other.borrow();
@@ -331,6 +466,16 @@ where
 
     fn is_valid(&self) -> bool {
         self.borrow().is_valid()
+    }
+
+    fn perpendicular(&self, guide: Option<&Self>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        let guide = guide.as_ref().map(|guide| guide.borrow());
+        self.borrow()
+            .perpendicular(guide.as_deref())
+            .map(|value| Rc::new(RefCell::new(value)))
     }
 }
 
@@ -370,6 +515,14 @@ where
         self.read().unwrap().get_axis(index)
     }
 
+    fn set_axis(&mut self, index: usize, value: Scalar) {
+        self.write().unwrap().set_axis(index, value);
+    }
+
+    fn count_axes(&self) -> usize {
+        self.read().unwrap().count_axes()
+    }
+
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let from: &T = &self.read().unwrap();
         let to: &T = &other.read().unwrap();
@@ -379,6 +532,17 @@ where
 
     fn is_valid(&self) -> bool {
         self.read().unwrap().is_valid()
+    }
+
+    fn perpendicular(&self, guide: Option<&Self>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        let guide = guide.as_ref().map(|guide| guide.read().unwrap());
+        self.read()
+            .unwrap()
+            .perpendicular(guide.as_deref())
+            .map(|value| Arc::new(RwLock::new(value)))
     }
 }
 
@@ -555,6 +719,7 @@ pub enum CurveError {
     InvalidToParamValue,
     InvalidToValue,
     CannotSplit,
+    CannotShift,
 }
 
 impl std::fmt::Display for CurveError {
@@ -703,6 +868,43 @@ where
     /// Gets arc length of this curve.
     pub fn length(&self) -> Scalar {
         self.length
+    }
+
+    /// Reverses curve, so: F, FP, TP, T -> T, TP, FP, F
+    pub fn reverse(&self) -> Result<Self, CurveError> {
+        Self::bezier(
+            self.to.clone(),
+            self.to_param.clone(),
+            self.from_param.clone(),
+            self.from.clone(),
+        )
+    }
+
+    /// Shifts this curve by distance perpendicular to guide.
+    /// Produces low precision shift, so use it carefully!
+    pub fn shift(&self, distance: Scalar, guide: Option<&T>) -> Result<Self, CurveError> {
+        let tangent_from = self.from.delta(&self.from_param).normalize();
+        let tangent_to = self.to.delta(&self.to_param).normalize();
+        let normal_from = tangent_from
+            .perpendicular(guide)
+            .ok_or(CurveError::CannotShift)?
+            .normalize();
+        let normal_to = tangent_to
+            .perpendicular(guide)
+            .ok_or(CurveError::CannotShift)?
+            .normalize()
+            .negate();
+        let from = self.from.offset(&normal_from.scale(distance));
+        let to = self.to.offset(&normal_to.scale(distance));
+        let from_param = self
+            .from_param
+            .offset(&tangent_from.scale(distance))
+            .offset(&normal_from.scale(distance));
+        let to_param = self
+            .to_param
+            .offset(&tangent_to.scale(distance))
+            .offset(&normal_to.scale(distance));
+        Self::bezier(from, from_param, to_param, to)
     }
 
     /// Samples values along given axis in given number of steps.
@@ -1008,6 +1210,42 @@ mod tests {
                 sample,
                 diff
             );
+        }
+    }
+
+    #[test]
+    fn test_curve_shift() {
+        assert!(1.0.perpendicular(None).is_none());
+        assert_eq!((1.0, 2.0).perpendicular(None).unwrap(), (2.0, -1.0));
+        assert_eq!(
+            (1.0, 1.0, 0.0)
+                .perpendicular(Some(&(0.0, 0.0, 1.0)))
+                .unwrap(),
+            (1.0, -1.0, 0.0)
+        );
+
+        const DISTANCE: Scalar = 10.0;
+
+        let curve = Curve::bezier((0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)).unwrap();
+        let shifted = curve.shift(DISTANCE, None).unwrap();
+        for factor in factor_iter(10) {
+            let a = curve.sample(factor);
+            let b = shifted.sample(factor);
+            let distance = a.delta(&b).length();
+            assert!(distance <= 10.0, "distance: {}", distance);
+        }
+    }
+
+    #[test]
+    fn test_curve_reverse() {
+        let curve = Curve::bezier((0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)).unwrap();
+        let reversed = curve.reverse().unwrap();
+
+        for factor in factor_iter(10) {
+            let a = curve.sample(factor);
+            let b = reversed.sample(1.0 - factor);
+            let distance = a.delta(&b).length();
+            assert!(distance <= 1.0e-4, "distance: {}", distance);
         }
     }
 }

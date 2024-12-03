@@ -31,6 +31,18 @@ where
     }
 }
 
+impl<T> SplinePointDirection<T>
+where
+    T: Curved,
+{
+    pub fn reverse(&self) -> Self {
+        match self {
+            Self::Single(value) => Self::Single(value.negate()),
+            Self::InOut(value_in, value_out) => Self::InOut(value_out.negate(), value_in.negate()),
+        }
+    }
+}
+
 /// Defines spline point.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SplinePoint<T>
@@ -108,6 +120,13 @@ where
                 }
             })
             .collect()
+    }
+
+    pub fn reverse(&self) -> Self
+    where
+        T: Clone,
+    {
+        Self::new(self.point.clone(), self.direction.reverse())
     }
 }
 
@@ -274,6 +293,11 @@ where
     /// Uses Catmull-Rom method of finding valid tangents for spline smooth continuity.
     pub fn smooth(points: &[T], strength: Scalar) -> Result<Self, SplineError> {
         Self::new(SplinePoint::smooth(points, strength))
+    }
+
+    /// Reverse spline so all points build a sequence from last to first with reversed directions.
+    pub fn reverse(&self) -> Result<Self, SplineError> {
+        Self::new(self.points.iter().map(|point| point.reverse()).collect())
     }
 
     /// Samples values along given axis in given number of steps.
