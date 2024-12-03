@@ -297,7 +297,13 @@ where
 
     /// Reverse spline so all points build a sequence from last to first with reversed directions.
     pub fn reverse(&self) -> Result<Self, SplineError> {
-        Self::new(self.points.iter().map(|point| point.reverse()).collect())
+        Self::new(
+            self.points
+                .iter()
+                .rev()
+                .map(|point| point.reverse())
+                .collect(),
+        )
     }
 
     /// Samples values along given axis in given number of steps.
