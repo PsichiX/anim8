@@ -2,6 +2,7 @@ use crate::{utils::range_iter, Scalar};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
+    error::Error,
     rc::Rc,
     sync::{Arc, RwLock},
 };
@@ -727,6 +728,8 @@ impl std::fmt::Display for CurveError {
         write!(f, "{:?}", self)
     }
 }
+
+impl Error for CurveError {}
 
 /// Interpolated Bezier Curve.
 ///

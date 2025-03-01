@@ -4,7 +4,7 @@ use crate::{
     Scalar,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::convert::TryFrom;
+use std::{convert::TryFrom, error::Error};
 
 const EPSILON: Scalar = Scalar::EPSILON * 10.0;
 
@@ -194,6 +194,8 @@ impl std::fmt::Display for SplineError {
         write!(f, "{:?}", self)
     }
 }
+
+impl Error for SplineError {}
 
 /// Serializable spline definition defined by spline points.
 pub type SplineDef<T> = Vec<SplinePoint<T>>;
