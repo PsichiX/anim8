@@ -196,6 +196,11 @@ impl Phase {
         }
     }
 
+    /// Gets slice of spline points distances and values.
+    pub fn points_distances_values(&self) -> &[(Scalar, (Scalar, Scalar))] {
+        self.spline.points_distances_values()
+    }
+
     /// Gets cached spline.
     pub fn spline(&self) -> &Spline<(Scalar, Scalar)> {
         &self.spline

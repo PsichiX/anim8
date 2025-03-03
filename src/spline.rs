@@ -404,6 +404,11 @@ where
         }
     }
 
+    /// Gets slice of spline points distances and values.
+    pub fn points_distances_values(&self) -> &[(Scalar, T)] {
+        &self.points_distances_values
+    }
+
     /// Gets slice of cached curves.
     pub fn curves(&self) -> &[Curve<T>] {
         &self.cached
