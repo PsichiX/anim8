@@ -113,8 +113,21 @@ where
     }
 }
 
+impl<T> PartialEq for Transition<T>
+where
+    T: Clone + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.from == other.from
+            && self.to == other.to
+            && self.phase == other.phase
+            && self.playing == other.playing
+            && self.time == other.time
+    }
+}
+
 /// Describes playable step transition between two data values using animation phase.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SwitchTransition {
     value: bool,
     #[serde(default)]

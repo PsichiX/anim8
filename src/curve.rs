@@ -725,7 +725,14 @@ pub enum CurveError {
 
 impl std::fmt::Display for CurveError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::InvalidFromValue => write!(f, "Invalid from value"),
+            Self::InvalidFromParamValue => write!(f, "Invalid from param value"),
+            Self::InvalidToParamValue => write!(f, "Invalid to param value"),
+            Self::InvalidToValue => write!(f, "Invalid to value"),
+            Self::CannotSplit => write!(f, "Cannot split"),
+            Self::CannotShift => write!(f, "Cannot shift"),
+        }
     }
 }
 
@@ -1178,6 +1185,19 @@ where
     }
 }
 
+impl<T> PartialEq for Curve<T>
+where
+    T: Clone + Curved + CurvedChange + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.from == other.from
+            && self.from_param == other.from_param
+            && self.to_param == other.to_param
+            && self.to == other.to
+            && self.length == other.length
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1214,6 +1234,19 @@ mod tests {
                 diff
             );
         }
+    }
+
+    #[test]
+    fn test_curve_split() {
+        let curve = Curve::linear((0.0, 0.0), (10.0, 0.0)).unwrap();
+        assert!(curve.split(0.0).is_err());
+        assert!(curve.split(1.0).is_err());
+
+        let (left, right) = curve.split(0.5).unwrap();
+        assert_eq!(left.from, (0.0, 0.0));
+        assert_eq!(left.to, (5.0, 0.0));
+        assert_eq!(right.from, (5.0, 0.0));
+        assert_eq!(right.to, (10.0, 0.0));
     }
 
     #[test]

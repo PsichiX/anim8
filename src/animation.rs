@@ -98,8 +98,21 @@ where
     }
 }
 
+impl<T> PartialEq for Animation<T>
+where
+    T: Default + Clone + Curved + CurvedChange + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.value_spline == other.value_spline
+            && self.time_phase == other.time_phase
+            && self.playing == other.playing
+            && self.looped == other.looped
+            && self.time == other.time
+    }
+}
+
 /// Describes playable animation using value phase.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PhaseAnimation {
     pub value_phase: Phase,
     #[serde(default)]
@@ -278,5 +291,19 @@ where
             }
             self.time = time.max(0.0).min(duration);
         }
+    }
+}
+
+impl<T> PartialEq for Interpolation<T>
+where
+    T: Default + Clone + Curved + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.from == other.from
+            && self.to == other.to
+            && self.time_phase == other.time_phase
+            && self.playing == other.playing
+            && self.looped == other.looped
+            && self.time == other.time
     }
 }

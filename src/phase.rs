@@ -72,7 +72,7 @@ pub type PhaseDef = Vec<SplinePoint<(Scalar, Scalar)>>;
 /// Animation phase.
 ///
 /// It focuses on using spline X axis as time and Y axis as values.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(try_from = "PhaseDef")]
 #[serde(into = "PhaseDef")]
 pub struct Phase {

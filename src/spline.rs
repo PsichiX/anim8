@@ -43,6 +43,19 @@ where
     }
 }
 
+impl<T> PartialEq for SplinePointDirection<T>
+where
+    T: Curved + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Single(l0), Self::Single(r0)) => l0 == r0,
+            (Self::InOut(l0, l1), Self::InOut(r0, r1)) => l0 == r0 && l1 == r1,
+            _ => false,
+        }
+    }
+}
+
 /// Defines spline point.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SplinePoint<T>
@@ -177,12 +190,21 @@ where
     }
 }
 
+impl<T> PartialEq for SplinePoint<T>
+where
+    T: Curved + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.point == other.point && self.direction == other.direction
+    }
+}
+
 /// Errors happening within spline operations.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum SplineError {
     EmptyPointsList,
     Curve(
-        /// Points pair index.
+        /// Curve index (matches points pair index).
         usize,
         /// Curve error.
         CurveError,
@@ -191,7 +213,10 @@ pub enum SplineError {
 
 impl std::fmt::Display for SplineError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::EmptyPointsList => write!(f, "Empty points list"),
+            Self::Curve(index, error) => write!(f, "Curve #{} error: {}", index, error),
+        }
     }
 }
 
@@ -510,6 +535,55 @@ where
             })
             .unwrap()
     }
+
+    /// Splits spline in two at factor (time) along the spline.
+    /// Returns tuple of left and right parts of original spline.
+    pub fn split(&self, factor: Scalar) -> Result<(Self, Self), SplineError> {
+        let (index, _, factor) = self.find_curve_index_offset_factor(factor);
+        let (left, right) = if factor < EPSILON {
+            if index == 0 {
+                return Err(SplineError::Curve(index, CurveError::CannotSplit));
+            }
+            (
+                self.points[..(index + 1)].to_vec(),
+                self.points[index..].to_vec(),
+            )
+        } else if factor > 1.0 - EPSILON {
+            if index == self.cached.len() - 1 {
+                return Err(SplineError::Curve(index, CurveError::CannotSplit));
+            }
+            (
+                self.points[..(index + 2)].to_vec(),
+                self.points[(index + 1)..].to_vec(),
+            )
+        } else {
+            let point = self.cached[index].sample(factor);
+            let tangent = self.cached[index].sample_tangent(factor);
+            let left = self.points[..=index]
+                .iter()
+                .filter(|item| item.point.delta(&point).length_squared() > EPSILON)
+                .cloned()
+                .chain(std::iter::once(SplinePoint::new(
+                    point.clone(),
+                    SplinePointDirection::Single(tangent.clone()),
+                )))
+                .collect::<Vec<_>>();
+            let right = std::iter::once(SplinePoint::new(
+                point.clone(),
+                SplinePointDirection::Single(tangent.clone()),
+            ))
+            .chain(
+                self.points[(index + 1)..]
+                    .iter()
+                    .filter(|item| item.point.delta(&point).length_squared() > EPSILON)
+                    .cloned(),
+            )
+            .collect::<Vec<_>>();
+            (left, right)
+        };
+
+        Ok((Self::new(left)?, Self::new(right)?))
+    }
 }
 
 impl<T> TryFrom<SplineDef<T>> for Spline<T>
@@ -529,5 +603,127 @@ where
 {
     fn from(v: Spline<T>) -> Self {
         v.points
+    }
+}
+
+impl<T> PartialEq for Spline<T>
+where
+    T: Default + Clone + Curved + CurvedChange + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.points == other.points
+            && self.cached == other.cached
+            && self.length == other.length
+            && self.points_distances_values == other.points_distances_values
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_spline_split() {
+        let spline = Spline::new(vec![
+            SplinePoint::new((-100.0, 0.0), SplinePointDirection::Single((0.0, 100.0))),
+            SplinePoint::new((0.0, 100.0), SplinePointDirection::Single((100.0, 0.0))),
+            SplinePoint::new((100.0, 0.0), SplinePointDirection::Single((0.0, -100.0))),
+        ])
+        .unwrap();
+
+        assert!(spline.split(0.0).is_err());
+        assert!(spline.split(1.0).is_err());
+
+        let (left, right) = spline.split(0.5).unwrap();
+        assert_eq!(left.points(), &spline.points()[..=1]);
+        assert_eq!(right.points(), &spline.points()[1..]);
+
+        let (left, right) = spline.split(0.25).unwrap();
+        assert_eq!(
+            left.points(),
+            &[
+                SplinePoint {
+                    point: (-100.0, 0.0),
+                    direction: SplinePointDirection::Single((0.0, 100.0)),
+                },
+                SplinePoint {
+                    point: (-87.5, 87.5),
+                    #[cfg(not(feature = "scalar64"))]
+                    direction: SplinePointDirection::Single((0.70710677, 0.70710677)),
+                    #[cfg(feature = "scalar64")]
+                    direction: SplinePointDirection::Single((
+                        0.7071067811865475,
+                        0.7071067811865475
+                    )),
+                }
+            ]
+        );
+        assert_eq!(
+            right.points(),
+            &[
+                SplinePoint {
+                    point: (-87.5, 87.5),
+                    #[cfg(not(feature = "scalar64"))]
+                    direction: SplinePointDirection::Single((0.70710677, 0.70710677)),
+                    #[cfg(feature = "scalar64")]
+                    direction: SplinePointDirection::Single((
+                        0.7071067811865475,
+                        0.7071067811865475
+                    )),
+                },
+                SplinePoint {
+                    point: (0.0, 100.0),
+                    direction: SplinePointDirection::Single((100.0, 0.0)),
+                },
+                SplinePoint {
+                    point: (100.0, 0.0),
+                    direction: SplinePointDirection::Single((0.0, -100.0)),
+                }
+            ]
+        );
+
+        let (left, right) = spline.split(0.75).unwrap();
+        assert_eq!(
+            left.points(),
+            &[
+                SplinePoint {
+                    point: (-100.0, 0.0),
+                    direction: SplinePointDirection::Single((0.0, 100.0)),
+                },
+                SplinePoint {
+                    point: (0.0, 100.0),
+                    direction: SplinePointDirection::Single((100.0, 0.0)),
+                },
+                SplinePoint {
+                    point: (87.5, 87.5),
+                    #[cfg(not(feature = "scalar64"))]
+                    direction: SplinePointDirection::Single((0.70710677, -0.70710677)),
+                    #[cfg(feature = "scalar64")]
+                    direction: SplinePointDirection::Single((
+                        0.7071067811865475,
+                        -0.7071067811865475
+                    )),
+                }
+            ]
+        );
+        assert_eq!(
+            right.points(),
+            &[
+                SplinePoint {
+                    point: (87.5, 87.5),
+                    #[cfg(not(feature = "scalar64"))]
+                    direction: SplinePointDirection::Single((0.70710677, -0.70710677)),
+                    #[cfg(feature = "scalar64")]
+                    direction: SplinePointDirection::Single((
+                        0.7071067811865475,
+                        -0.7071067811865475
+                    )),
+                },
+                SplinePoint {
+                    point: (100.0, 0.0),
+                    direction: SplinePointDirection::Single((0.0, -100.0)),
+                }
+            ]
+        );
     }
 }
