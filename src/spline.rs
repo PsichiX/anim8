@@ -209,6 +209,14 @@ pub enum SplineError {
         /// Curve error.
         CurveError,
     ),
+    CurvePair(
+        /// First curve index (matches points pair index).
+        usize,
+        /// Second curve index (matches points pair index).
+        usize,
+        /// Curve error.
+        CurveError,
+    ),
 }
 
 impl std::fmt::Display for SplineError {
@@ -216,6 +224,11 @@ impl std::fmt::Display for SplineError {
         match self {
             Self::EmptyPointsList => write!(f, "Empty points list"),
             Self::Curve(index, error) => write!(f, "Curve #{} error: {}", index, error),
+            Self::CurvePair(first_index, second_index, error) => write!(
+                f,
+                "Curve #{} with curve #{} error: {}",
+                first_index, second_index, error
+            ),
         }
     }
 }
@@ -583,6 +596,60 @@ where
         };
 
         Ok((Self::new(left)?, Self::new(right)?))
+    }
+
+    /// Finds list of all time (factors) at which extremities for given axis are.
+    pub fn find_extremities(&self, axis_index: usize) -> Vec<Scalar> {
+        let mut result = Vec::new();
+        for curve in self.curves() {
+            curve.find_extremities_inner(axis_index, &mut result);
+        }
+        result
+    }
+
+    /// Calculate AABB of the spline using its extremities.
+    /// Returned value is tuple of min and max points.
+    pub fn aabb(&self) -> (T, T) {
+        let start = self.sample(0.0);
+        let end = self.sample(1.0);
+        let mut min = start.minimum(&end);
+        let mut max = start.maximum(&end);
+        for axis in 0..start.count_axes() {
+            for factor in self.find_extremities(axis) {
+                let point = self.sample(factor);
+                min = min.minimum(&point);
+                max = max.maximum(&point);
+            }
+        }
+        (min, max)
+    }
+
+    /// Finds list of all time (factors) pair tuples between this and other spline,
+    /// at which two splines intersect.
+    pub fn find_intersections(
+        &self,
+        other: &Self,
+        max_iterations: usize,
+    ) -> Result<Vec<(Scalar, Scalar)>, SplineError> {
+        let mut result = Default::default();
+        // TODO: optimize?
+        for (first, a) in self.curves().iter().enumerate() {
+            for (second, b) in other.curves().iter().enumerate() {
+                a.find_intersections_inner(b, 0.0..0.5, 0.5..1.0, max_iterations, &mut result)
+                    .map_err(|error| SplineError::CurvePair(first, second, error))?;
+            }
+        }
+        Ok(result)
+    }
+
+    /// Finds list of all time (factors) pair tuples at which this spline
+    /// intersects with itself.
+    pub fn find_self_intersections(
+        &self,
+        max_iterations: usize,
+    ) -> Result<Vec<(Scalar, Scalar)>, SplineError> {
+        let (a, b) = self.split(0.5)?;
+        a.find_intersections(&b, max_iterations)
     }
 }
 

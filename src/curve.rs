@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
     error::Error,
+    ops::Range,
     rc::Rc,
     sync::{Arc, RwLock},
 };
@@ -552,6 +553,8 @@ pub trait CurvedChange {
     fn offset(&self, other: &Self) -> Self;
     fn delta(&self, other: &Self) -> Self;
     fn dot(&self, other: &Self) -> Scalar;
+    fn minimum(&self, other: &Self) -> Self;
+    fn maximum(&self, other: &Self) -> Self;
 }
 
 impl CurvedChange for Scalar {
@@ -565,6 +568,14 @@ impl CurvedChange for Scalar {
 
     fn dot(&self, other: &Self) -> Scalar {
         self * other
+    }
+
+    fn minimum(&self, other: &Self) -> Self {
+        self.min(*other)
+    }
+
+    fn maximum(&self, other: &Self) -> Self {
+        self.max(*other)
     }
 }
 
@@ -580,6 +591,14 @@ impl CurvedChange for (Scalar, Scalar) {
     fn dot(&self, other: &Self) -> Scalar {
         self.0 * other.0 + self.1 * other.1
     }
+
+    fn minimum(&self, other: &Self) -> Self {
+        (self.0.min(other.0), self.1.min(other.1))
+    }
+
+    fn maximum(&self, other: &Self) -> Self {
+        (self.0.max(other.0), self.1.max(other.1))
+    }
 }
 
 impl CurvedChange for (Scalar, Scalar, Scalar) {
@@ -593,6 +612,22 @@ impl CurvedChange for (Scalar, Scalar, Scalar) {
 
     fn dot(&self, other: &Self) -> Scalar {
         self.0 * other.0 + self.1 * other.1 + self.2 * other.2
+    }
+
+    fn minimum(&self, other: &Self) -> Self {
+        (
+            self.0.min(other.0),
+            self.1.min(other.1),
+            self.2.min(other.2),
+        )
+    }
+
+    fn maximum(&self, other: &Self) -> Self {
+        (
+            self.0.max(other.0),
+            self.1.max(other.1),
+            self.2.max(other.2),
+        )
     }
 }
 
@@ -608,6 +643,14 @@ impl CurvedChange for [Scalar; 2] {
     fn dot(&self, other: &Self) -> Scalar {
         self[0] * other[0] + self[1] * other[1]
     }
+
+    fn minimum(&self, other: &Self) -> Self {
+        [self[0].min(other[0]), self[1].min(other[1])]
+    }
+
+    fn maximum(&self, other: &Self) -> Self {
+        [self[0].max(other[0]), self[1].max(other[1])]
+    }
 }
 
 impl CurvedChange for [Scalar; 3] {
@@ -621,6 +664,22 @@ impl CurvedChange for [Scalar; 3] {
 
     fn dot(&self, other: &Self) -> Scalar {
         self[0] * other[0] + self[1] * other[1] + self[2] * other[2]
+    }
+
+    fn minimum(&self, other: &Self) -> Self {
+        [
+            self[0].min(other[0]),
+            self[1].min(other[1]),
+            self[2].min(other[2]),
+        ]
+    }
+
+    fn maximum(&self, other: &Self) -> Self {
+        [
+            self[0].max(other[0]),
+            self[1].max(other[1]),
+            self[2].max(other[2]),
+        ]
     }
 }
 
@@ -645,6 +704,18 @@ where
         let to: &T = &other.borrow();
         from.dot(to)
     }
+
+    fn minimum(&self, other: &Self) -> Self {
+        let from: &T = &self.borrow();
+        let to: &T = &other.borrow();
+        Rc::new(RefCell::new(from.minimum(to)))
+    }
+
+    fn maximum(&self, other: &Self) -> Self {
+        let from: &T = &self.borrow();
+        let to: &T = &other.borrow();
+        Rc::new(RefCell::new(from.maximum(to)))
+    }
 }
 
 impl<T> CurvedChange for Arc<RwLock<T>>
@@ -667,6 +738,18 @@ where
         let from: &T = &self.read().unwrap();
         let to: &T = &other.read().unwrap();
         from.dot(to)
+    }
+
+    fn minimum(&self, other: &Self) -> Self {
+        let from: &T = &self.read().unwrap();
+        let to: &T = &other.read().unwrap();
+        Arc::new(RwLock::new(from.minimum(to)))
+    }
+
+    fn maximum(&self, other: &Self) -> Self {
+        let from: &T = &self.read().unwrap();
+        let to: &T = &other.read().unwrap();
+        Arc::new(RwLock::new(from.maximum(to)))
     }
 }
 
@@ -1041,6 +1124,156 @@ where
         })
     }
 
+    /// Finds list of all time (factors) at which extremities for given axis are.
+    pub fn find_extremities(&self, axis_index: usize) -> Vec<Scalar> {
+        let mut result = Vec::new();
+        self.find_extremities_inner(axis_index, &mut result);
+        result
+    }
+
+    pub(crate) fn find_extremities_inner(&self, axis_index: usize, out_result: &mut Vec<Scalar>) {
+        let Some(p0) = self.from.get_axis(axis_index) else {
+            return Default::default();
+        };
+        let Some(p1) = self.from_param.get_axis(axis_index) else {
+            return Default::default();
+        };
+        let Some(p2) = self.to_param.get_axis(axis_index) else {
+            return Default::default();
+        };
+        let Some(p3) = self.to.get_axis(axis_index) else {
+            return Default::default();
+        };
+        let d0 = 3.0 * (p1 - p0);
+        let d1 = 3.0 * (p2 - p1);
+        let d2 = 3.0 * (p3 - p2);
+        let a = d0 - 2.0 * d1 + d2;
+        let b = 2.0 * (d1 - d0);
+        let c = d0;
+        if a.abs() < EPSILON {
+            if b.abs() >= EPSILON {
+                let t = -c / b;
+                if (0.0..=1.0).contains(&t) {
+                    out_result.push(t);
+                }
+            }
+        } else {
+            let discriminant = b * b - 4.0 * a * c;
+            if discriminant >= 0.0 {
+                let discriminant_squared = discriminant.sqrt();
+                let t1 = (-b + discriminant_squared) / (2.0 * a);
+                let t2 = (-b - discriminant_squared) / (2.0 * a);
+                if (0.0..=1.0).contains(&t1) {
+                    out_result.push(t1);
+                }
+                if (0.0..=1.0).contains(&t2) {
+                    out_result.push(t2);
+                }
+            }
+        }
+    }
+
+    /// Calculate AABB of the curve using its extremities.
+    /// Returned value is tuple of min and max points.
+    pub fn aabb(&self) -> (T, T) {
+        let start = self.sample(0.0);
+        let end = self.sample(1.0);
+        let mut min = start.minimum(&end);
+        let mut max = start.maximum(&end);
+        for axis in 0..start.count_axes() {
+            for factor in self.find_extremities(axis) {
+                let point = self.sample(factor);
+                min = min.minimum(&point);
+                max = max.maximum(&point);
+            }
+        }
+        (min, max)
+    }
+
+    /// Finds list of all time (factors) pair tuples between this and other curve,
+    /// at which two curves intersect.
+    pub fn find_intersections(
+        &self,
+        other: &Self,
+        max_iterations: usize,
+    ) -> Result<Vec<(Scalar, Scalar)>, CurveError> {
+        let mut result = Default::default();
+        self.find_intersections_inner(other, 0.0..0.5, 0.5..1.0, max_iterations, &mut result)?;
+        Ok(result)
+    }
+
+    pub(crate) fn find_intersections_inner(
+        &self,
+        other: &Self,
+        range: Range<Scalar>,
+        other_range: Range<Scalar>,
+        mut max_iterations: usize,
+        out_result: &mut Vec<(Scalar, Scalar)>,
+    ) -> Result<(), CurveError> {
+        fn does_aabb_overlap<T: Curved + CurvedChange>(
+            (a_min, a_max): (T, T),
+            (b_min, b_max): (T, T),
+        ) -> bool {
+            for axis in 0..a_min.count_axes() {
+                let Some(a_min) = a_min.get_axis(axis) else {
+                    return false;
+                };
+                let Some(a_max) = a_max.get_axis(axis) else {
+                    return false;
+                };
+                let Some(b_min) = b_min.get_axis(axis) else {
+                    return false;
+                };
+                let Some(b_max) = b_max.get_axis(axis) else {
+                    return false;
+                };
+                if a_min > b_max || a_max < b_min {
+                    return false;
+                }
+            }
+            true
+        }
+
+        if does_aabb_overlap(self.aabb(), other.aabb()) {
+            let af = (range.start + range.end) * 0.5;
+            let bf = (other_range.start + other_range.end) * 0.5;
+            if max_iterations > 0 {
+                max_iterations -= 1;
+                let (aa, ab) = self.split(0.5)?;
+                let (ba, bb) = other.split(0.5)?;
+                let aar = range.start..af;
+                let abr = af..range.end;
+                let bar = other_range.start..bf;
+                let bbr = bf..other_range.end;
+                aa.find_intersections_inner(
+                    &ba,
+                    aar.clone(),
+                    bar.clone(),
+                    max_iterations,
+                    out_result,
+                )?;
+                aa.find_intersections_inner(&bb, aar, bbr.clone(), max_iterations, out_result)?;
+                ab.find_intersections_inner(&ba, abr.clone(), bar, max_iterations, out_result)?;
+                ab.find_intersections_inner(&bb, abr, bbr, max_iterations, out_result)?;
+            } else {
+                // TODO: find line-line intersection and guiess T from that?
+                // for now simple middle point should suffice.
+                out_result.push((af, bf));
+            }
+        }
+        Ok(())
+    }
+
+    /// Finds list of all time (factors) pair tuples at which this curve
+    /// intersects with itself.
+    pub fn find_self_intersections(
+        &self,
+        max_iterations: usize,
+    ) -> Result<Vec<(Scalar, Scalar)>, CurveError> {
+        let (a, b) = self.split(0.5)?;
+        a.find_intersections(&b, max_iterations)
+    }
+
     fn estimate_arc_length(&self) -> Scalar {
         let a = self.from.delta(&self.from_param).length();
         let b = self.from_param.delta(&self.to_param).length();
@@ -1283,5 +1516,23 @@ mod tests {
             let distance = a.delta(&b).length();
             assert!(distance <= 1.0e-4, "distance: {}", distance);
         }
+    }
+
+    #[test]
+    fn test_curve_intersections() {
+        let a = Curve::bezier((0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)).unwrap();
+        let b = Curve::bezier((50.0, 50.0), (0.0, 50.0), (0.0, 0.0), (50.0, 0.0)).unwrap();
+
+        assert_eq!(a.aabb(), ((0.0, 0.0), (75.0, 100.0)));
+        assert_eq!(b.aabb(), ((12.5, 0.0), (50.0, 50.0)));
+
+        #[cfg(not(feature = "scalar64"))]
+        let expected = vec![(0.055908203, 0.91918945), (0.055908203, 0.91967773)];
+        #[cfg(feature = "scalar64")]
+        let expected = vec![
+            (0.055908203125, 0.919189453125),
+            (0.055908203125, 0.919677734375),
+        ];
+        assert_eq!(a.find_intersections(&b, 10).unwrap(), expected,);
     }
 }
