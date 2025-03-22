@@ -2,6 +2,7 @@ use crate::{utils::range_iter, Scalar};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
+    cmp::Ordering,
     error::Error,
     ops::Range,
     rc::Rc,
@@ -14,6 +15,8 @@ const ARC_LENGTH_ITERATIONS: usize = 5;
 
 /// Curved trait gives an interface over Interpolated Bezier Curve.
 pub trait Curved {
+    const AXES: usize;
+
     fn zero() -> Self;
     fn one() -> Self;
     fn negate(&self) -> Self;
@@ -23,7 +26,6 @@ pub trait Curved {
     fn length_squared(&self) -> Scalar;
     fn get_axis(&self, index: usize) -> Option<Scalar>;
     fn set_axis(&mut self, index: usize, value: Scalar);
-    fn count_axes(&self) -> usize;
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self;
     fn is_valid(&self) -> bool;
 
@@ -48,6 +50,8 @@ pub trait Curved {
 }
 
 impl Curved for Scalar {
+    const AXES: usize = 1;
+
     fn zero() -> Self {
         0.0
     }
@@ -89,10 +93,6 @@ impl Curved for Scalar {
         }
     }
 
-    fn count_axes(&self) -> usize {
-        1
-    }
-
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let diff = other - self;
         diff * factor + self
@@ -104,6 +104,8 @@ impl Curved for Scalar {
 }
 
 impl Curved for (Scalar, Scalar) {
+    const AXES: usize = 2;
+
     fn zero() -> Self {
         (0.0, 0.0)
     }
@@ -152,10 +154,6 @@ impl Curved for (Scalar, Scalar) {
         }
     }
 
-    fn count_axes(&self) -> usize {
-        2
-    }
-
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let diff0 = other.0 - self.0;
         let diff1 = other.1 - self.1;
@@ -175,6 +173,8 @@ impl Curved for (Scalar, Scalar) {
 }
 
 impl Curved for [Scalar; 2] {
+    const AXES: usize = 2;
+
     fn zero() -> Self {
         [0.0, 0.0]
     }
@@ -223,10 +223,6 @@ impl Curved for [Scalar; 2] {
         }
     }
 
-    fn count_axes(&self) -> usize {
-        2
-    }
-
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let diff0 = other[0] - self[0];
         let diff1 = other[1] - self[1];
@@ -246,6 +242,8 @@ impl Curved for [Scalar; 2] {
 }
 
 impl Curved for (Scalar, Scalar, Scalar) {
+    const AXES: usize = 3;
+
     fn zero() -> Self {
         (0.0, 0.0, 0.0)
     }
@@ -298,10 +296,6 @@ impl Curved for (Scalar, Scalar, Scalar) {
         }
     }
 
-    fn count_axes(&self) -> usize {
-        3
-    }
-
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let diff0 = other.0 - self.0;
         let diff1 = other.1 - self.1;
@@ -331,6 +325,8 @@ impl Curved for (Scalar, Scalar, Scalar) {
 }
 
 impl Curved for [Scalar; 3] {
+    const AXES: usize = 3;
+
     fn zero() -> Self {
         [0.0, 0.0, 0.0]
     }
@@ -383,10 +379,6 @@ impl Curved for [Scalar; 3] {
         }
     }
 
-    fn count_axes(&self) -> usize {
-        3
-    }
-
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let diff0 = other[0] - self[0];
         let diff1 = other[1] - self[1];
@@ -419,6 +411,8 @@ impl<T> Curved for Rc<RefCell<T>>
 where
     T: Curved,
 {
+    const AXES: usize = T::AXES;
+
     fn zero() -> Self {
         Rc::new(RefCell::new(T::zero()))
     }
@@ -455,10 +449,6 @@ where
         self.borrow_mut().set_axis(index, value);
     }
 
-    fn count_axes(&self) -> usize {
-        self.borrow().count_axes()
-    }
-
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let from: &T = &self.borrow();
         let to: &T = &other.borrow();
@@ -485,6 +475,8 @@ impl<T> Curved for Arc<RwLock<T>>
 where
     T: Curved,
 {
+    const AXES: usize = T::AXES;
+
     fn zero() -> Self {
         Arc::new(RwLock::new(T::zero()))
     }
@@ -521,10 +513,6 @@ where
         self.write().unwrap().set_axis(index, value);
     }
 
-    fn count_axes(&self) -> usize {
-        self.read().unwrap().count_axes()
-    }
-
     fn interpolate(&self, other: &Self, factor: Scalar) -> Self {
         let from: &T = &self.read().unwrap();
         let to: &T = &other.read().unwrap();
@@ -555,6 +543,13 @@ pub trait CurvedChange {
     fn dot(&self, other: &Self) -> Scalar;
     fn minimum(&self, other: &Self) -> Self;
     fn maximum(&self, other: &Self) -> Self;
+
+    fn is_nearly_equal_to(&self, other: &Self, epsilon: Scalar) -> bool
+    where
+        Self: Curved + Sized,
+    {
+        self.delta(other).length_squared() < epsilon * epsilon
+    }
 }
 
 impl CurvedChange for Scalar {
@@ -804,6 +799,7 @@ pub enum CurveError {
     InvalidToValue,
     CannotSplit,
     CannotShift,
+    CannotOffset,
 }
 
 impl std::fmt::Display for CurveError {
@@ -815,11 +811,20 @@ impl std::fmt::Display for CurveError {
             Self::InvalidToValue => write!(f, "Invalid to value"),
             Self::CannotSplit => write!(f, "Cannot split"),
             Self::CannotShift => write!(f, "Cannot shift"),
+            Self::CannotOffset => write!(f, "Cannot offset"),
         }
     }
 }
 
 impl Error for CurveError {}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CurveCategory {
+    Point,
+    Straight,
+    CurvedParallel,
+    Curved,
+}
 
 /// Interpolated Bezier Curve.
 ///
@@ -848,6 +853,8 @@ where
     to_param: T,
     to: T,
     length: Scalar,
+    aabb: (T, T),
+    category: CurveCategory,
 }
 
 impl<T> Default for Curve<T>
@@ -882,6 +889,8 @@ where
             to_param,
             to,
             length: 0.0,
+            aabb: (T::zero(), T::zero()),
+            category: CurveCategory::Curved,
         })
     }
 
@@ -890,19 +899,21 @@ where
         let from_param = from.interpolate(&to, 1.0 / 3.0);
         let to_param = from.interpolate(&to, 2.0 / 3.0);
         let mut result = Self::new_uninitialized(from, from_param, to_param, to)?;
-        result.recalculate_length();
+        result.update_cache();
         Ok(result)
     }
 
     /// Builds curve from all Bezier params.
     pub fn bezier(from: T, from_param: T, to_param: T, to: T) -> Result<Self, CurveError> {
         let mut result = Self::new_uninitialized(from, from_param, to_param, to)?;
-        result.recalculate_length();
+        result.update_cache();
         Ok(result)
     }
 
-    fn recalculate_length(&mut self) {
+    fn update_cache(&mut self) {
         self.length = self.arc_length(EPSILON);
+        self.aabb = self.calculate_aabb();
+        self.category = self.categorize();
     }
 
     /// Gets starting point.
@@ -913,7 +924,7 @@ where
     /// Sets starting point.
     pub fn set_from(&mut self, value: T) {
         self.from = value;
-        self.recalculate_length();
+        self.update_cache();
     }
 
     /// Gets starting tangent point.
@@ -924,7 +935,7 @@ where
     /// Sets starting tangent point.
     pub fn set_from_param(&mut self, value: T) {
         self.from_param = value;
-        self.recalculate_length();
+        self.update_cache();
     }
 
     /// Gets ending tangent point.
@@ -935,7 +946,7 @@ where
     /// Sets ending tangent point.
     pub fn set_to_param(&mut self, value: T) {
         self.to_param = value;
-        self.recalculate_length();
+        self.update_cache();
     }
 
     /// Gets ending point.
@@ -946,7 +957,7 @@ where
     /// Sets ending point.
     pub fn set_to(&mut self, value: T) {
         self.to = value;
-        self.recalculate_length();
+        self.update_cache();
     }
 
     /// Sets all Bezier curve parameters.
@@ -955,12 +966,23 @@ where
         self.from_param = from_param;
         self.to_param = to_param;
         self.to = to;
-        self.recalculate_length();
+        self.update_cache();
     }
 
     /// Gets arc length of this curve.
     pub fn length(&self) -> Scalar {
         self.length
+    }
+
+    /// AABB of this curve.
+    /// Returns tuple of min-max pair.
+    pub fn aabb(&self) -> (&T, &T) {
+        (&self.aabb.0, &self.aabb.1)
+    }
+
+    /// Returns category of this curve.
+    pub fn category(&self) -> CurveCategory {
+        self.category
     }
 
     /// Reverses curve, so: F, FP, TP, T -> T, TP, FP, F
@@ -973,8 +995,27 @@ where
         )
     }
 
+    /// Projects this curve onto plane defined by origin and normal.
+    pub fn to_planar(&self, plane_origin: &T, plane_normal: &T) -> Result<Self, CurveError> {
+        let mut points = [
+            self.from.clone(),
+            self.from_param.clone(),
+            self.to_param.clone(),
+            self.to.clone(),
+        ];
+        let plane_normal = plane_normal.normalize();
+        for point in &mut points {
+            let v = plane_origin.delta(point);
+            let distance = v.dot(&plane_normal);
+            *point = plane_normal.scale(distance).delta(point);
+        }
+        let [from, from_param, to_param, to] = points;
+        Self::bezier(from, from_param, to_param, to)
+    }
+
     /// Shifts this curve by distance perpendicular to guide.
     /// Produces low precision shift, so use it carefully!
+    /// If you need high precision, use offset function.
     pub fn shift(&self, distance: Scalar, guide: Option<&T>) -> Result<Self, CurveError> {
         let tangent_from = self.from.delta(&self.from_param).normalize();
         let tangent_to = self.to.delta(&self.to_param).normalize();
@@ -998,6 +1039,143 @@ where
             .offset(&tangent_to.scale(distance))
             .offset(&normal_to.scale(distance));
         Self::bezier(from, from_param, to_param, to)
+    }
+
+    /// Offsets this curve by distance.
+    /// This produces high precision offsetted series of safe curves to ensure
+    /// curves follow original shape as closely as possible.
+    pub fn offset(&self, distance: Scalar, guide: Option<&T>) -> Result<Vec<Self>, CurveError> {
+        let mut result = Vec::new();
+        self.build_safe_curves(&mut result);
+        for target in &mut result {
+            let source = if let Some(guide) = guide {
+                let centroid = target
+                    .from
+                    .offset(&target.from_param)
+                    .offset(&target.to_param)
+                    .offset(&target.to)
+                    .scale(0.25);
+                target.to_planar(&centroid, guide)?
+            } else {
+                target.clone()
+            };
+            match source.category() {
+                CurveCategory::Point => {
+                    return Err(CurveError::CannotOffset);
+                }
+                CurveCategory::Straight => {
+                    let direction = source.from.delta(&source.to).normalize();
+                    let Some(right) = direction.perpendicular(guide) else {
+                        continue;
+                    };
+                    for point in [
+                        &mut target.from,
+                        &mut target.from_param,
+                        &mut target.to_param,
+                        &mut target.to,
+                    ] {
+                        *point = point.offset(&right.scale(distance));
+                    }
+                    target.update_cache();
+                }
+                CurveCategory::CurvedParallel => {
+                    // Fallback to low precision shifting.
+                    // This most likely will fail the bigger the curvature, but
+                    // most likely it won't ever be the case to get curved
+                    // parallel curve bc those are not safe and will be splitted.
+                    *target = target.shift(distance, guide)?;
+                }
+                CurveCategory::Curved => {
+                    let front_tangent = source.from.delta(&source.from_param).normalize();
+                    let back_tangent = source.to_param.delta(&source.to).normalize();
+                    let front_normal = front_tangent
+                        .perpendicular(guide)
+                        .ok_or(CurveError::CannotOffset)?
+                        .normalize();
+                    let back_normal = back_tangent
+                        .perpendicular(guide)
+                        .ok_or(CurveError::CannotOffset)?
+                        .normalize();
+                    let origin = ray_intersection(
+                        &source.from,
+                        &front_normal,
+                        &source.to,
+                        &back_normal,
+                        guide,
+                    )
+                    .unwrap();
+                    let from_param_direction = origin.delta(&source.from_param).normalize();
+                    let to_param_direction = origin.delta(&source.to_param).normalize();
+                    let from_point = source.from.offset(&front_normal.scale(distance));
+                    let to_point = source.to.offset(&back_normal.scale(distance));
+                    let from_param = ray_intersection(
+                        &from_point,
+                        &front_tangent,
+                        &origin,
+                        &from_param_direction,
+                        guide,
+                    )
+                    .unwrap();
+                    let to_param = ray_intersection(
+                        &to_point,
+                        &back_tangent,
+                        &origin,
+                        &to_param_direction,
+                        guide,
+                    )
+                    .unwrap();
+                    target.from = target.from.offset(&front_normal.scale(distance));
+                    target.to = target.to.offset(&back_normal.scale(distance));
+                    target.from_param = target.from.offset(&from_point.delta(&from_param));
+                    target.to_param = target.to.offset(&to_point.delta(&to_param));
+                    target.update_cache();
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// Builds safe curves out of this curve.
+    /// Safe curve means curve has at most one extremity and extremity is within
+    /// circle between curve start and end points.
+    /// Original curve is split at points of extremities until all sub-curves are
+    /// considered safe.
+    pub fn build_safe_curves(&self, out_result: &mut Vec<Self>) {
+        let mut extremities = Vec::new();
+        for axis in 0..T::AXES {
+            self.find_extremities_for_axis_inner(axis, &mut extremities);
+        }
+        extremities.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+        if extremities.is_empty() {
+            out_result.push(self.clone());
+            return;
+        }
+        if extremities.len() == 1 {
+            let midpoint = self.sample(extremities[0]);
+            let center = self.from.offset(&self.to).scale(0.5);
+            let radius = self.from.delta(&self.to).length() * 0.5;
+            if midpoint.delta(&center).length_squared() < radius * radius {
+                out_result.push(self.clone());
+                return;
+            }
+        }
+        let mut current = Result::<Self, &Self>::Err(self);
+        for factor in extremities {
+            let curve = match current {
+                Ok(ref curve) => curve,
+                Err(curve) => curve,
+            };
+            let (curve, rest) = match curve.split(factor) {
+                Ok(result) => result,
+                Err(_) => break,
+            };
+            curve.build_safe_curves(out_result);
+            current = Ok(rest);
+        }
+        out_result.push(match current {
+            Ok(curve) => curve,
+            Err(curve) => curve.clone(),
+        });
     }
 
     /// Samples values along given axis in given number of steps.
@@ -1118,20 +1296,33 @@ where
     /// Splits curve into two parts at given factor.
     pub fn split(&self, factor: Scalar) -> Result<(Self, Self), CurveError> {
         self.split_uninitialized(factor).map(|(mut a, mut b)| {
-            a.recalculate_length();
-            b.recalculate_length();
+            a.update_cache();
+            b.update_cache();
             (a, b)
         })
     }
 
-    /// Finds list of all time (factors) at which extremities for given axis are.
-    pub fn find_extremities(&self, axis_index: usize) -> Vec<Scalar> {
+    /// Finds list of all time (factors) at which extremities exist.
+    pub fn find_extremities(&self) -> Vec<Scalar> {
         let mut result = Vec::new();
-        self.find_extremities_inner(axis_index, &mut result);
+        for axis in 0..T::AXES {
+            self.find_extremities_for_axis_inner(axis, &mut result);
+        }
         result
     }
 
-    pub(crate) fn find_extremities_inner(&self, axis_index: usize, out_result: &mut Vec<Scalar>) {
+    /// Finds list of all time (factors) at which extremities for given axis exist.
+    pub fn find_extremities_for_axis(&self, axis_index: usize) -> Vec<Scalar> {
+        let mut result = Vec::new();
+        self.find_extremities_for_axis_inner(axis_index, &mut result);
+        result
+    }
+
+    pub(crate) fn find_extremities_for_axis_inner(
+        &self,
+        axis_index: usize,
+        out_result: &mut Vec<Scalar>,
+    ) {
         let Some(p0) = self.from.get_axis(axis_index) else {
             return Default::default();
         };
@@ -1153,41 +1344,31 @@ where
         if a.abs() < EPSILON {
             if b.abs() >= EPSILON {
                 let t = -c / b;
-                if (0.0..=1.0).contains(&t) {
+                if t > 0.0 && t < 1.0 && !out_result.iter().any(|item| (t - item).abs() <= EPSILON)
+                {
                     out_result.push(t);
                 }
             }
         } else {
-            let discriminant = b * b - 4.0 * a * c;
-            if discriminant >= 0.0 {
-                let discriminant_squared = discriminant.sqrt();
-                let t1 = (-b + discriminant_squared) / (2.0 * a);
-                let t2 = (-b - discriminant_squared) / (2.0 * a);
-                if (0.0..=1.0).contains(&t1) {
+            let discriminant_squared = b * b - 4.0 * a * c;
+            if discriminant_squared >= 0.0 {
+                let discriminant = discriminant_squared.sqrt();
+                let t1 = (-b + discriminant) / (2.0 * a);
+                let t2 = (-b - discriminant) / (2.0 * a);
+                if t1 > 0.0
+                    && t1 < 1.0
+                    && !out_result.iter().any(|item| (t1 - item).abs() <= EPSILON)
+                {
                     out_result.push(t1);
                 }
-                if (0.0..=1.0).contains(&t2) {
+                if t2 > 0.0
+                    && t2 < 1.0
+                    && !out_result.iter().any(|item| (t2 - item).abs() <= EPSILON)
+                {
                     out_result.push(t2);
                 }
             }
         }
-    }
-
-    /// Calculate AABB of the curve using its extremities.
-    /// Returned value is tuple of min and max points.
-    pub fn aabb(&self) -> (T, T) {
-        let start = self.sample(0.0);
-        let end = self.sample(1.0);
-        let mut min = start.minimum(&end);
-        let mut max = start.maximum(&end);
-        for axis in 0..start.count_axes() {
-            for factor in self.find_extremities(axis) {
-                let point = self.sample(factor);
-                min = min.minimum(&point);
-                max = max.maximum(&point);
-            }
-        }
-        (min, max)
     }
 
     /// Finds list of all time (factors) pair tuples between this and other curve,
@@ -1196,9 +1377,17 @@ where
         &self,
         other: &Self,
         max_iterations: usize,
+        min_length: Scalar,
     ) -> Result<Vec<(Scalar, Scalar)>, CurveError> {
         let mut result = Default::default();
-        self.find_intersections_inner(other, 0.0..0.5, 0.5..1.0, max_iterations, &mut result)?;
+        self.find_intersections_inner(
+            other,
+            0.0..0.5,
+            0.5..1.0,
+            max_iterations,
+            min_length,
+            &mut result,
+        )?;
         Ok(result)
     }
 
@@ -1208,13 +1397,14 @@ where
         range: Range<Scalar>,
         other_range: Range<Scalar>,
         mut max_iterations: usize,
+        min_length: Scalar,
         out_result: &mut Vec<(Scalar, Scalar)>,
     ) -> Result<(), CurveError> {
         fn does_aabb_overlap<T: Curved + CurvedChange>(
-            (a_min, a_max): (T, T),
-            (b_min, b_max): (T, T),
+            (a_min, a_max): (&T, &T),
+            (b_min, b_max): (&T, &T),
         ) -> bool {
-            for axis in 0..a_min.count_axes() {
+            for axis in 0..T::AXES {
                 let Some(a_min) = a_min.get_axis(axis) else {
                     return false;
                 };
@@ -1234,7 +1424,10 @@ where
             true
         }
 
-        if does_aabb_overlap(self.aabb(), other.aabb()) {
+        if self.length() >= min_length
+            && other.length() >= min_length
+            && does_aabb_overlap(self.aabb(), other.aabb())
+        {
             let af = (range.start + range.end) * 0.5;
             let bf = (other_range.start + other_range.end) * 0.5;
             if max_iterations > 0 {
@@ -1250,11 +1443,26 @@ where
                     aar.clone(),
                     bar.clone(),
                     max_iterations,
+                    min_length,
                     out_result,
                 )?;
-                aa.find_intersections_inner(&bb, aar, bbr.clone(), max_iterations, out_result)?;
-                ab.find_intersections_inner(&ba, abr.clone(), bar, max_iterations, out_result)?;
-                ab.find_intersections_inner(&bb, abr, bbr, max_iterations, out_result)?;
+                aa.find_intersections_inner(
+                    &bb,
+                    aar,
+                    bbr.clone(),
+                    max_iterations,
+                    min_length,
+                    out_result,
+                )?;
+                ab.find_intersections_inner(
+                    &ba,
+                    abr.clone(),
+                    bar,
+                    max_iterations,
+                    min_length,
+                    out_result,
+                )?;
+                ab.find_intersections_inner(&bb, abr, bbr, max_iterations, min_length, out_result)?;
             } else {
                 // TODO: find line-line intersection and guiess T from that?
                 // for now simple middle point should suffice.
@@ -1269,9 +1477,10 @@ where
     pub fn find_self_intersections(
         &self,
         max_iterations: usize,
+        min_length: Scalar,
     ) -> Result<Vec<(Scalar, Scalar)>, CurveError> {
         let (a, b) = self.split(0.5)?;
-        a.find_intersections(&b, max_iterations)
+        a.find_intersections(&b, max_iterations, min_length)
     }
 
     fn estimate_arc_length(&self) -> Scalar {
@@ -1303,11 +1512,47 @@ where
         a + b
     }
 
+    fn calculate_aabb(&self) -> (T, T) {
+        let start = self.sample(0.0);
+        let end = self.sample(1.0);
+        let mut min = start.minimum(&end);
+        let mut max = start.maximum(&end);
+        for axis in 0..T::AXES {
+            for factor in self.find_extremities_for_axis(axis) {
+                let point = self.sample(factor);
+                min = min.minimum(&point);
+                max = max.maximum(&point);
+            }
+        }
+        (min, max)
+    }
+
+    fn categorize(&self) -> CurveCategory {
+        if [&self.from_param, &self.to_param, &self.to]
+            .iter()
+            .all(|p| self.from.delta(p).length_squared() < EPSILON)
+        {
+            return CurveCategory::Point;
+        }
+        let direction = self.from.delta(&self.to).normalize();
+        let front = self.from.delta(&self.from_param).normalize();
+        let back = self.to_param.delta(&self.to).normalize();
+        if front.dot(&direction).abs() >= 1.0 - EPSILON
+            && back.dot(&direction).abs() >= 1.0 - EPSILON
+        {
+            return CurveCategory::Straight;
+        }
+        if front.dot(&back).abs() >= 1.0 - EPSILON {
+            return CurveCategory::CurvedParallel;
+        }
+        CurveCategory::Curved
+    }
+
     /// Finds distance along the curve for given time (factor).
     pub fn find_distance_for_time(&self, factor: Scalar) -> Scalar {
         self.split_uninitialized(factor)
             .map(|(mut curve, _)| {
-                curve.recalculate_length();
+                curve.update_cache();
                 curve.length
             })
             .unwrap_or_else(|_| if factor < 0.5 { 0.0 } else { self.length })
@@ -1431,6 +1676,25 @@ where
     }
 }
 
+fn ray_intersection<T: Curved + CurvedChange>(
+    a_point: &T,
+    a_direction: &T,
+    b_point: &T,
+    b_direction: &T,
+    guide: Option<&T>,
+) -> Option<T> {
+    let normal = a_direction.perpendicular(guide)?;
+    let a = a_point.dot(&normal);
+    let b = b_point.dot(&normal);
+    let c = a_direction.dot(&normal);
+    let d = b_direction.dot(&normal);
+    if (d - c).abs() < EPSILON {
+        return None;
+    }
+    let factor = (a - b) / (d - c);
+    Some(b_point.offset(&b_direction.scale(factor)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1506,6 +1770,144 @@ mod tests {
     }
 
     #[test]
+    fn test_curve_planar() {
+        fn project_point_on_plane<T: Curved + CurvedChange>(
+            point: &T,
+            plane_origin: &T,
+            plane_normal: &T,
+        ) -> T {
+            let plane_normal = plane_normal.normalize();
+            let v = plane_origin.delta(point);
+            let distance = v.dot(&plane_normal);
+            plane_normal.scale(distance).delta(point)
+        }
+
+        let curve = Curve::bezier(
+            (-100.0, -100.0),
+            (0.0, -100.0),
+            (0.0, 100.0),
+            (100.0, 100.0),
+        )
+        .unwrap();
+        let plane_origin = (0.0, 0.0);
+        let plane_normal = (0.0, 0.0);
+        let planar = curve.to_planar(&plane_origin, &plane_normal).unwrap();
+        assert!(planar.from().is_nearly_equal_to(&(-100.0, -100.0), 1.0e-6));
+        assert!(planar
+            .from_param()
+            .is_nearly_equal_to(&(0.0, -100.0), 1.0e-6));
+        assert!(planar.to_param().is_nearly_equal_to(&(0.0, 100.0), 1.0e-6));
+        assert!(planar.to().is_nearly_equal_to(&(100.0, 100.0), 1.0e-6));
+        for factor in factor_iter(10) {
+            let a = project_point_on_plane(&curve.sample(factor), &plane_origin, &plane_normal);
+            let b = planar.sample(factor);
+            assert!(a.is_nearly_equal_to(&b, 1.0e-4));
+        }
+
+        let curve = Curve::bezier(
+            (-100.0, -100.0, -100.0),
+            (0.0, -100.0, -100.0),
+            (0.0, 100.0, 100.0),
+            (100.0, 100.0, 100.0),
+        )
+        .unwrap();
+        let plane_origin = (0.0, 0.0, 0.0);
+        let plane_normal = (0.0, 0.0, 1.0);
+        let planar = curve.to_planar(&plane_origin, &plane_normal).unwrap();
+        assert!(planar
+            .from()
+            .is_nearly_equal_to(&(-100.0, -100.0, 0.0), 1.0e-6));
+        assert!(planar
+            .from_param()
+            .is_nearly_equal_to(&(0.0, -100.0, 0.0), 1.0e-6));
+        assert!(planar
+            .to_param()
+            .is_nearly_equal_to(&(0.0, 100.0, 0.0), 1.0e-6));
+        assert!(planar.to().is_nearly_equal_to(&(100.0, 100.0, 0.0), 1.0e-6));
+        for factor in factor_iter(10) {
+            let a = project_point_on_plane(&curve.sample(factor), &plane_origin, &plane_normal);
+            let b = planar.sample(factor);
+            assert!(a.is_nearly_equal_to(&b, 1.0e-4));
+        }
+
+        let curve = Curve::bezier(
+            (-100.0, -100.0, -100.0),
+            (0.0, -100.0, -100.0),
+            (0.0, 100.0, 100.0),
+            (100.0, 100.0, 100.0),
+        )
+        .unwrap();
+        let plane_origin = (0.0, 0.0, 0.0);
+        let plane_normal = (-1.0, 1.0, 0.0);
+        let planar = curve.to_planar(&plane_origin, &plane_normal).unwrap();
+        assert!(planar
+            .from()
+            .is_nearly_equal_to(&(-100.0, -100.0, -100.0), 1.0e-6));
+        assert!(planar
+            .from_param()
+            .is_nearly_equal_to(&(-50.0, -50.0, -100.0), 1.0e-6));
+        assert!(planar
+            .to_param()
+            .is_nearly_equal_to(&(50.0, 50.0, 100.0), 1.0e-6));
+        assert!(planar
+            .to()
+            .is_nearly_equal_to(&(100.0, 100.0, 100.0), 1.0e-6));
+        for factor in factor_iter(10) {
+            let a = project_point_on_plane(&curve.sample(factor), &plane_origin, &plane_normal);
+            let b = planar.sample(factor);
+            assert!(a.is_nearly_equal_to(&b, 1.0e-4));
+        }
+    }
+
+    #[test]
+    fn test_curve_offset() {
+        const DISTANCE: Scalar = 10.0;
+
+        let curve = Curve::bezier((0.0, 0.0), (50.0, 0.0), (100.0, 50.0), (100.0, 100.0)).unwrap();
+        assert!(curve.find_extremities().is_empty());
+        let offsetted = curve.offset(DISTANCE, None).unwrap();
+        assert_eq!(offsetted.len(), 1);
+        for factor in factor_iter(10) {
+            let a = curve.sample(factor);
+            let b = offsetted[0].sample(factor);
+            let difference = a.delta(&b).length();
+            assert!(
+                difference.is_nearly_equal_to(&10.0, 1.0),
+                "difference: {} at factor: {}",
+                difference,
+                factor
+            );
+        }
+
+        let curve = Curve::bezier((0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)).unwrap();
+        assert_eq!(curve.find_extremities().len(), 1);
+        let offsetted = curve.offset(DISTANCE, None).unwrap();
+        assert_eq!(offsetted.len(), 2);
+        for factor in factor_iter(5) {
+            let a = curve.sample(factor * 0.5);
+            let b = offsetted[0].sample(factor);
+            let difference = a.delta(&b).length();
+            assert!(
+                difference.is_nearly_equal_to(&10.0, 1.0),
+                "difference: {} at factor: {}",
+                difference,
+                factor * 0.5
+            );
+        }
+        for factor in factor_iter(5) {
+            let a = curve.sample(factor * 0.5 + 0.5);
+            let b = offsetted[1].sample(factor);
+            let difference = a.delta(&b).length();
+            assert!(
+                difference.is_nearly_equal_to(&10.0, 1.0),
+                "difference: {} at factor: {}",
+                difference,
+                factor * 0.5 + 0.5
+            );
+        }
+    }
+
+    #[test]
     fn test_curve_reverse() {
         let curve = Curve::bezier((0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)).unwrap();
         let reversed = curve.reverse().unwrap();
@@ -1523,8 +1925,8 @@ mod tests {
         let a = Curve::bezier((0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)).unwrap();
         let b = Curve::bezier((50.0, 50.0), (0.0, 50.0), (0.0, 0.0), (50.0, 0.0)).unwrap();
 
-        assert_eq!(a.aabb(), ((0.0, 0.0), (75.0, 100.0)));
-        assert_eq!(b.aabb(), ((12.5, 0.0), (50.0, 50.0)));
+        assert_eq!(a.aabb(), (&(0.0, 0.0), &(75.0, 100.0)));
+        assert_eq!(b.aabb(), (&(12.5, 0.0), &(50.0, 50.0)));
 
         #[cfg(not(feature = "scalar64"))]
         let expected = vec![(0.055908203, 0.91918945), (0.055908203, 0.91967773)];
@@ -1533,6 +1935,67 @@ mod tests {
             (0.055908203125, 0.919189453125),
             (0.055908203125, 0.919677734375),
         ];
-        assert_eq!(a.find_intersections(&b, 10).unwrap(), expected,);
+        assert_eq!(a.find_intersections(&b, 10, 0.1).unwrap(), expected,);
+    }
+
+    #[test]
+    fn test_curve_category() {
+        let curve = Curve::linear((0.0, 0.0), (100.0, 100.0)).unwrap();
+        assert_eq!(curve.categorize(), CurveCategory::Straight);
+
+        let curve = Curve::bezier((0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)).unwrap();
+        assert_eq!(curve.categorize(), CurveCategory::CurvedParallel);
+
+        let curve = Curve::bezier((0.0, 0.0), (50.0, 0.0), (100.0, 50.0), (100.0, 100.0)).unwrap();
+        assert_eq!(curve.categorize(), CurveCategory::Curved);
+    }
+
+    #[test]
+    fn test_ray_intersection() {
+        let provided =
+            ray_intersection(&(0.0, 0.0), &(1.0, 0.0), &(100.0, 100.0), &(0.0, 1.0), None).unwrap();
+        let expected = (100.0, 0.0);
+        assert!(
+            provided.is_nearly_equal_to(&expected, 1.0e-4),
+            "provided: {:?}, expected: {:?}",
+            provided,
+            expected
+        );
+
+        let provided = ray_intersection(
+            &(0.0, 0.0, 0.0),
+            &(1.0, 0.0, 0.0),
+            &(100.0, 100.0, 100.0),
+            &(0.0, 1.0, 0.0),
+            Some(&(0.0, 0.0, 1.0)),
+        )
+        .unwrap();
+        let expected = (100.0, 0.0, 100.0);
+        assert!(
+            provided.is_nearly_equal_to(&expected, 1.0e-4),
+            "provided: {:?}, expected: {:?}",
+            provided,
+            expected
+        );
+
+        let provided = ray_intersection(
+            &(0.0, 0.0),
+            &(1.0, 1.0).normalize(),
+            &(100.0, 0.0),
+            &(-1.0, 1.0).normalize(),
+            None,
+        )
+        .unwrap();
+        let expected = (50.0, 50.0);
+        assert!(
+            provided.is_nearly_equal_to(&expected, 1.0e-4),
+            "provided: {:?}, expected: {:?}",
+            provided,
+            expected
+        );
+
+        let provided =
+            ray_intersection(&(0.0, 0.0), &(0.0, 1.0), &(100.0, 100.0), &(0.0, 1.0), None);
+        assert!(provided.is_none(), "provided: {:?}", provided);
     }
 }

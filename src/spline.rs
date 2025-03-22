@@ -135,11 +135,45 @@ where
             .collect()
     }
 
+    pub fn from_curve(curve: &Curve<T>) -> [Self; 2]
+    where
+        T: Clone + Curved + CurvedChange,
+    {
+        [
+            Self::new(
+                curve.from().clone(),
+                SplinePointDirection::Single(curve.from().delta(curve.from_param())),
+            ),
+            Self::new(
+                curve.to().clone(),
+                SplinePointDirection::Single(curve.to_param().delta(curve.to())),
+            ),
+        ]
+    }
+
     pub fn reverse(&self) -> Self
     where
         T: Clone,
     {
         Self::new(self.point.clone(), self.direction.reverse())
+    }
+
+    pub fn is_similar_to(&self, other: &Self) -> bool
+    where
+        T: Clone + Curved + CurvedChange,
+    {
+        if self.point.delta(&other.point).length_squared() >= EPSILON {
+            return false;
+        }
+        let (a, b) = match &self.direction {
+            SplinePointDirection::Single(dir) => (dir.negate(), dir.clone()),
+            SplinePointDirection::InOut(prev, next) => (prev.clone(), next.negate()),
+        };
+        let (c, d) = match &other.direction {
+            SplinePointDirection::Single(dir) => (dir.negate(), dir.clone()),
+            SplinePointDirection::InOut(prev, next) => (prev.clone(), next.negate()),
+        };
+        a.delta(&c).length_squared() < EPSILON && b.delta(&d).length_squared() < EPSILON
     }
 }
 
@@ -344,6 +378,30 @@ where
                 .map(|point| point.reverse())
                 .collect(),
         )
+    }
+
+    /// Offsets this spline by distance.
+    /// This produces high precision offsetted spline that ensures spline follow
+    /// original shape as closely as possible.
+    pub fn offset(&self, distance: Scalar, guide: Option<&T>) -> Result<Self, SplineError> {
+        let mut points = Vec::default();
+        for (index, curve) in self.curves().iter().enumerate() {
+            let curves = curve
+                .offset(distance, guide)
+                .map_err(|error| SplineError::Curve(index, error))?;
+            for curve in curves {
+                for point in SplinePoint::from_curve(&curve) {
+                    if points
+                        .last()
+                        .map(|last| !point.is_similar_to(last))
+                        .unwrap_or(true)
+                    {
+                        points.push(point);
+                    }
+                }
+            }
+        }
+        Self::new(points)
     }
 
     /// Samples values along given axis in given number of steps.
@@ -602,7 +660,7 @@ where
     pub fn find_extremities(&self, axis_index: usize) -> Vec<Scalar> {
         let mut result = Vec::new();
         for curve in self.curves() {
-            curve.find_extremities_inner(axis_index, &mut result);
+            curve.find_extremities_for_axis_inner(axis_index, &mut result);
         }
         result
     }
@@ -614,7 +672,7 @@ where
         let end = self.sample(1.0);
         let mut min = start.minimum(&end);
         let mut max = start.maximum(&end);
-        for axis in 0..start.count_axes() {
+        for axis in 0..T::AXES {
             for factor in self.find_extremities(axis) {
                 let point = self.sample(factor);
                 min = min.minimum(&point);
@@ -630,13 +688,21 @@ where
         &self,
         other: &Self,
         max_iterations: usize,
+        min_length: Scalar,
     ) -> Result<Vec<(Scalar, Scalar)>, SplineError> {
         let mut result = Default::default();
         // TODO: optimize?
         for (first, a) in self.curves().iter().enumerate() {
             for (second, b) in other.curves().iter().enumerate() {
-                a.find_intersections_inner(b, 0.0..0.5, 0.5..1.0, max_iterations, &mut result)
-                    .map_err(|error| SplineError::CurvePair(first, second, error))?;
+                a.find_intersections_inner(
+                    b,
+                    0.0..0.5,
+                    0.5..1.0,
+                    max_iterations,
+                    min_length,
+                    &mut result,
+                )
+                .map_err(|error| SplineError::CurvePair(first, second, error))?;
             }
         }
         Ok(result)
@@ -647,9 +713,10 @@ where
     pub fn find_self_intersections(
         &self,
         max_iterations: usize,
+        min_length: Scalar,
     ) -> Result<Vec<(Scalar, Scalar)>, SplineError> {
         let (a, b) = self.split(0.5)?;
-        a.find_intersections(&b, max_iterations)
+        a.find_intersections(&b, max_iterations, min_length)
     }
 }
 
@@ -688,6 +755,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::factor_iter;
 
     #[test]
     fn test_spline_split() {
@@ -792,5 +860,65 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn test_spline_point_similarity() {
+        let a = SplinePoint {
+            point: (4.0, 2.0),
+            direction: SplinePointDirection::Single((1.0, 0.0)),
+        };
+        let b = SplinePoint {
+            point: (0.0, 0.0),
+            direction: SplinePointDirection::Single((1.0, 0.0)),
+        };
+        let c = SplinePoint {
+            point: (4.0, 2.0),
+            direction: SplinePointDirection::Single((0.0, 1.0)),
+        };
+        assert!(a.is_similar_to(&a));
+        assert!(!a.is_similar_to(&b));
+        assert!(!a.is_similar_to(&c));
+    }
+
+    #[test]
+    fn test_spline_offset() {
+        const DISTANCE: Scalar = 10.0;
+
+        let spline = Spline::new(vec![
+            SplinePoint::new((0.0, 0.0), SplinePointDirection::Single((50.0, 0.0))),
+            SplinePoint::new((100.0, 100.0), SplinePointDirection::Single((0.0, 50.0))),
+        ])
+        .unwrap();
+        let offsetted = spline.offset(DISTANCE, None).unwrap();
+        for factor in factor_iter(10) {
+            let a = spline.sample(factor);
+            let b = offsetted.sample(factor);
+            let difference = a.delta(&b).length();
+            assert!(
+                difference.is_nearly_equal_to(&10.0, 1.0),
+                "difference: {} at factor: {}",
+                difference,
+                factor * 0.5
+            );
+        }
+
+        let spline = Spline::new(vec![
+            SplinePoint::new((0.0, 0.0), SplinePointDirection::Single((100.0, 0.0))),
+            SplinePoint::new((0.0, 100.0), SplinePointDirection::Single((-100.0, 0.0))),
+        ])
+        .unwrap();
+        let offsetted = spline.offset(DISTANCE, None).unwrap();
+        for factor in factor_iter(10) {
+            let a = spline.sample(factor);
+            let b = offsetted.sample(factor);
+            let difference = a.delta(&b).length();
+            assert!(
+                difference.is_nearly_equal_to(&10.0, 1.0),
+                "difference: {} at factor: {}",
+                difference,
+                factor * 0.5
+            );
+        }
     }
 }
