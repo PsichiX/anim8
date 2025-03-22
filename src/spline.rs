@@ -656,8 +656,19 @@ where
         Ok((Self::new(left)?, Self::new(right)?))
     }
 
-    /// Finds list of all time (factors) at which extremities for given axis are.
-    pub fn find_extremities(&self, axis_index: usize) -> Vec<Scalar> {
+    /// Finds list of all time (factors) at which extremities exist.
+    pub fn find_extremities(&self) -> Vec<Scalar> {
+        let mut result = Vec::new();
+        for axis in 0..T::AXES {
+            for curve in self.curves() {
+                curve.find_extremities_for_axis_inner(axis, &mut result);
+            }
+        }
+        result
+    }
+
+    /// Finds list of all time (factors) at which extremities for given axis exist.
+    pub fn find_extremities_for_axis(&self, axis_index: usize) -> Vec<Scalar> {
         let mut result = Vec::new();
         for curve in self.curves() {
             curve.find_extremities_for_axis_inner(axis_index, &mut result);
@@ -673,7 +684,7 @@ where
         let mut min = start.minimum(&end);
         let mut max = start.maximum(&end);
         for axis in 0..T::AXES {
-            for factor in self.find_extremities(axis) {
+            for factor in self.find_extremities_for_axis(axis) {
                 let point = self.sample(factor);
                 min = min.minimum(&point);
                 max = max.maximum(&point);
