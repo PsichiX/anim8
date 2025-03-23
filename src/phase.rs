@@ -88,17 +88,9 @@ impl Default for Phase {
 
 impl Phase {
     /// Builds new animation phase out of spline points.
-    pub fn new(mut points: Vec<SplinePoint<(Scalar, Scalar)>>) -> Result<Self, SplineError> {
+    pub fn new(points: Vec<SplinePoint<(Scalar, Scalar)>>) -> Result<Self, SplineError> {
         let mut time_frame = Scalar::INFINITY..Scalar::NEG_INFINITY;
-        for point in &mut points {
-            match &mut point.direction {
-                SplinePointDirection::Single(dir) => dir.0 = dir.0.max(0.0),
-                SplinePointDirection::InOut(from, to) => {
-                    from.0 = from.0.min(0.0);
-                    to.0 = to.0.max(0.0);
-                }
-            }
-            point.point.0 = point.point.0.max(time_frame.end);
+        for point in &points {
             time_frame.start = time_frame.start.min(point.point.0);
             time_frame.end = time_frame.start.max(point.point.0);
         }
