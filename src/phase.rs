@@ -108,9 +108,17 @@ impl Phase {
         if time_frame.start > time_frame.end {
             time_frame = time_frame.end..value_frame.start;
         }
+        let value_diff = (value_frame.end - value_frame.start) / 3.0;
+        let time_diff = (time_frame.end - time_frame.start) / 3.0;
         Self::new(vec![
-            SplinePoint::point((time_frame.start, value_frame.start)),
-            SplinePoint::point((time_frame.end, value_frame.end)),
+            SplinePoint::new(
+                (time_frame.start, value_frame.start),
+                SplinePointDirection::Single((time_diff, value_diff)),
+            ),
+            SplinePoint::new(
+                (time_frame.end, value_frame.end),
+                SplinePointDirection::Single((time_diff, value_diff)),
+            ),
         ])
     }
 
@@ -227,5 +235,26 @@ impl TryFrom<PhaseDef> for Phase {
 impl From<Phase> for PhaseDef {
     fn from(v: Phase) -> Self {
         v.spline.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{curve::CurvedChange, utils::factor_iter};
+
+    #[test]
+    fn test_phase() {
+        let phase = Phase::linear(0.0..100.0, 0.0..10.0).unwrap();
+        for factor in factor_iter(10) {
+            let provided = phase.sample(factor * 10.0);
+            let expected = factor * 100.0;
+            assert!(
+                provided.is_nearly_equal_to(&expected, 1.0e-4),
+                "provided: {:?}, expected: {:?}",
+                provided,
+                expected
+            );
+        }
     }
 }

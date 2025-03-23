@@ -1585,8 +1585,9 @@ where
             return Some(1.0);
         }
         axis_value = axis_value.clamp(min, max);
+        let guess = (axis_value - min) / (max - min);
         Some(self.find_time_for(
-            None,
+            Some(guess),
             None,
             |time| {
                 let dv = self.sample(time).get_axis(axis_index)? - axis_value;
@@ -1699,6 +1700,37 @@ fn ray_intersection<T: Curved + CurvedChange>(
 mod tests {
     use super::*;
     use crate::utils::factor_iter;
+
+    #[test]
+    fn test_curve() {
+        let curve = Curve::linear((0.0, 0.0), (10.0, 100.0)).unwrap();
+
+        assert!(curve.sample(0.0).is_nearly_equal_to(&(0.0, 0.0), 1.0e-4));
+        assert!(curve.sample(0.5).is_nearly_equal_to(&(5.0, 50.0), 1.0e-4));
+        assert!(curve.sample(1.0).is_nearly_equal_to(&(10.0, 100.0), 1.0e-4));
+
+        for factor in factor_iter(10) {
+            let provided = curve.find_time_for_axis(factor * 100.0, 1).unwrap();
+            let expected = factor;
+            assert!(
+                provided.is_nearly_equal_to(&expected, 1.0e-4),
+                "provided: {:?}, expected: {:?}",
+                provided,
+                expected
+            );
+        }
+
+        for factor in factor_iter(10) {
+            let provided = curve.sample_along_axis(factor * 100.0, 1).unwrap();
+            let expected = (factor * 10.0, factor * 100.0);
+            assert!(
+                provided.is_nearly_equal_to(&expected, 1.0e-4),
+                "provided: {:?}, expected: {:?}",
+                provided,
+                expected
+            );
+        }
+    }
 
     #[test]
     fn test_curve_approximation() {
