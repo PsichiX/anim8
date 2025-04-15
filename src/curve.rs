@@ -1,4 +1,4 @@
-use crate::{utils::range_iter, Scalar};
+use crate::{Scalar, utils::range_iter};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
@@ -1825,9 +1825,11 @@ mod tests {
         let plane_normal = (0.0, 0.0);
         let planar = curve.to_planar(&plane_origin, &plane_normal).unwrap();
         assert!(planar.from().is_nearly_equal_to(&(-100.0, -100.0), 1.0e-6));
-        assert!(planar
-            .from_param()
-            .is_nearly_equal_to(&(0.0, -100.0), 1.0e-6));
+        assert!(
+            planar
+                .from_param()
+                .is_nearly_equal_to(&(0.0, -100.0), 1.0e-6)
+        );
         assert!(planar.to_param().is_nearly_equal_to(&(0.0, 100.0), 1.0e-6));
         assert!(planar.to().is_nearly_equal_to(&(100.0, 100.0), 1.0e-6));
         for factor in factor_iter(10) {
@@ -1846,15 +1848,21 @@ mod tests {
         let plane_origin = (0.0, 0.0, 0.0);
         let plane_normal = (0.0, 0.0, 1.0);
         let planar = curve.to_planar(&plane_origin, &plane_normal).unwrap();
-        assert!(planar
-            .from()
-            .is_nearly_equal_to(&(-100.0, -100.0, 0.0), 1.0e-6));
-        assert!(planar
-            .from_param()
-            .is_nearly_equal_to(&(0.0, -100.0, 0.0), 1.0e-6));
-        assert!(planar
-            .to_param()
-            .is_nearly_equal_to(&(0.0, 100.0, 0.0), 1.0e-6));
+        assert!(
+            planar
+                .from()
+                .is_nearly_equal_to(&(-100.0, -100.0, 0.0), 1.0e-6)
+        );
+        assert!(
+            planar
+                .from_param()
+                .is_nearly_equal_to(&(0.0, -100.0, 0.0), 1.0e-6)
+        );
+        assert!(
+            planar
+                .to_param()
+                .is_nearly_equal_to(&(0.0, 100.0, 0.0), 1.0e-6)
+        );
         assert!(planar.to().is_nearly_equal_to(&(100.0, 100.0, 0.0), 1.0e-6));
         for factor in factor_iter(10) {
             let a = project_point_on_plane(&curve.sample(factor), &plane_origin, &plane_normal);
@@ -1872,18 +1880,26 @@ mod tests {
         let plane_origin = (0.0, 0.0, 0.0);
         let plane_normal = (-1.0, 1.0, 0.0);
         let planar = curve.to_planar(&plane_origin, &plane_normal).unwrap();
-        assert!(planar
-            .from()
-            .is_nearly_equal_to(&(-100.0, -100.0, -100.0), 1.0e-6));
-        assert!(planar
-            .from_param()
-            .is_nearly_equal_to(&(-50.0, -50.0, -100.0), 1.0e-6));
-        assert!(planar
-            .to_param()
-            .is_nearly_equal_to(&(50.0, 50.0, 100.0), 1.0e-6));
-        assert!(planar
-            .to()
-            .is_nearly_equal_to(&(100.0, 100.0, 100.0), 1.0e-6));
+        assert!(
+            planar
+                .from()
+                .is_nearly_equal_to(&(-100.0, -100.0, -100.0), 1.0e-6)
+        );
+        assert!(
+            planar
+                .from_param()
+                .is_nearly_equal_to(&(-50.0, -50.0, -100.0), 1.0e-6)
+        );
+        assert!(
+            planar
+                .to_param()
+                .is_nearly_equal_to(&(50.0, 50.0, 100.0), 1.0e-6)
+        );
+        assert!(
+            planar
+                .to()
+                .is_nearly_equal_to(&(100.0, 100.0, 100.0), 1.0e-6)
+        );
         for factor in factor_iter(10) {
             let a = project_point_on_plane(&curve.sample(factor), &plane_origin, &plane_normal);
             let b = planar.sample(factor);

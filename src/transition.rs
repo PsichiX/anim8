@@ -1,4 +1,4 @@
-use crate::{phase::Phase, Scalar};
+use crate::{Scalar, phase::Phase};
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 

@@ -1,7 +1,7 @@
 use crate::{
+    Scalar,
     spline::{Spline, SplineError, SplinePoint, SplinePointDirection},
     utils::range_iter,
-    Scalar,
 };
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, ops::Range};

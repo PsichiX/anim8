@@ -1,10 +1,10 @@
 use crate::{
+    Scalar,
     curve::{Curved, CurvedChange},
     phase::Phase,
     spline::Spline,
-    Scalar,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// Describes playable animation using spline and time phase.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

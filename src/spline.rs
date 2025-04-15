@@ -1,9 +1,9 @@
 use crate::{
+    Scalar,
     curve::{Curve, CurveError, Curved, CurvedChange},
     utils::range_iter,
-    Scalar,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{convert::TryFrom, error::Error};
 
 const EPSILON: Scalar = Scalar::EPSILON * 10.0;

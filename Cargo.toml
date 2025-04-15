@@ -1,8 +1,8 @@
 [package]
 name = "anim8"
-version = "1.3.2"
+version = "1.4.0"
 authors = ["Patryk 'PsichiX' Budzynski <psichix@gmail.com>"]
-edition = "2021"
+edition = "2024"
 description = "Animation toolset"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/PsichiX/anim8"
