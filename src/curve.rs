@@ -550,6 +550,26 @@ pub trait CurvedChange {
     {
         self.delta(other).length_squared() < epsilon * epsilon
     }
+
+    fn project_on_plane(&self, plane_origin: &Self, plane_normal: &Self) -> Self
+    where
+        Self: Curved + Sized,
+    {
+        let plane_normal = plane_normal.normalize();
+        let v = plane_origin.delta(self);
+        let distance = v.dot(&plane_normal);
+        plane_normal.scale(distance).delta(self)
+    }
+
+    fn project_on_segment(&self, origin: &Self, direction: &Self) -> Self
+    where
+        Self: Curved + Sized,
+    {
+        let line_direction = direction.normalize();
+        let v = origin.delta(self);
+        let distance = v.dot(&line_direction);
+        line_direction.scale(distance).offset(origin)
+    }
 }
 
 impl CurvedChange for Scalar {
@@ -906,6 +926,48 @@ where
     /// Builds curve from all Bezier params.
     pub fn bezier(from: T, from_param: T, to_param: T, to: T) -> Result<Self, CurveError> {
         let mut result = Self::new_uninitialized(from, from_param, to_param, to)?;
+        result.update_cache();
+        Ok(result)
+    }
+
+    pub fn smooth(
+        from: T,
+        mut from_direction: T,
+        to: T,
+        mut to_direction: T,
+        guide: Option<&T>,
+    ) -> Result<Self, CurveError> {
+        from_direction = from_direction.normalize();
+        to_direction = to_direction.normalize();
+        let mut result = if let Some(origin) =
+            ray_intersection(&from, &from_direction, &to, &to_direction, guide)
+        {
+            let from_param = origin.interpolate(&from, 1.0 / 3.0);
+            let to_param = origin.interpolate(&to, 1.0 / 3.0);
+            Self::new_uninitialized(from, from_param, to_param, to)?
+        } else if from_direction
+            .dot(&to_direction)
+            .is_nearly_equal_to(&1.0, EPSILON)
+        {
+            let from_origin = to.project_on_segment(&from, &from_direction);
+            let to_origin = from.project_on_segment(&to, &to_direction);
+            let from_param = from.interpolate(&from_origin, 1.0 / 3.0);
+            let to_param = to.interpolate(&to_origin, 1.0 / 3.0);
+            Self::new_uninitialized(from, from_param, to_param, to)?
+        } else if from_direction
+            .dot(&to_direction)
+            .is_nearly_equal_to(&-1.0, EPSILON)
+        {
+            let radius = from.delta(&to).length().scale(0.5);
+            let from_param = from.offset(&from_direction.scale(radius));
+            let to_param = to.offset(&from_direction.scale(radius));
+            Self::new_uninitialized(from, from_param, to_param, to)?
+        } else {
+            let origin = from.interpolate(&to, 0.5);
+            let from_param = origin.interpolate(&from, 1.0 / 3.0);
+            let to_param = origin.interpolate(&to, 1.0 / 3.0);
+            Self::new_uninitialized(from, from_param, to_param, to)?
+        };
         result.update_cache();
         Ok(result)
     }
@@ -1996,6 +2058,59 @@ mod tests {
 
         let curve = Curve::bezier((0.0, 0.0), (50.0, 0.0), (100.0, 50.0), (100.0, 100.0)).unwrap();
         assert_eq!(curve.categorize(), CurveCategory::Curved);
+    }
+
+    #[test]
+    fn test_curve_smooth() {
+        let curve = Curve::smooth((0.0, 0.0), (1.0, 0.0), (100.0, 0.0), (1.0, 0.0), None).unwrap();
+        assert_eq!(curve.categorize(), CurveCategory::Straight);
+        assert!(curve.from().is_nearly_equal_to(&(0.0, 0.0), 1.0e-4));
+        assert!(
+            curve
+                .from_param()
+                .is_nearly_equal_to(&(33.3333, 0.0), 1.0e-4)
+        );
+        assert!(curve.to_param().is_nearly_equal_to(&(66.6666, 0.0), 1.0e-4));
+        assert!(curve.to().is_nearly_equal_to(&(100.0, 0.0), 1.0e-4));
+
+        let curve =
+            Curve::smooth((0.0, 0.0), (1.0, 0.0), (100.0, 100.0), (0.0, 1.0), None).unwrap();
+        assert_eq!(curve.categorize(), CurveCategory::Curved);
+        assert!(curve.from().is_nearly_equal_to(&(0.0, 0.0), 1.0e-4));
+        assert!(
+            curve
+                .from_param()
+                .is_nearly_equal_to(&(66.6666, 0.0), 1.0e-4)
+        );
+        assert!(
+            curve
+                .to_param()
+                .is_nearly_equal_to(&(100.0, 33.3333), 1.0e-4)
+        );
+        assert!(curve.to().is_nearly_equal_to(&(100.0, 100.0), 1.0e-4));
+
+        let curve =
+            Curve::smooth((0.0, 0.0), (1.0, 0.0), (100.0, 100.0), (1.0, 0.0), None).unwrap();
+        assert_eq!(curve.categorize(), CurveCategory::CurvedParallel);
+        assert!(curve.from().is_nearly_equal_to(&(0.0, 0.0), 1.0e-4));
+        assert!(
+            curve
+                .from_param()
+                .is_nearly_equal_to(&(33.3333, 0.0), 1.0e-4)
+        );
+        assert!(
+            curve
+                .to_param()
+                .is_nearly_equal_to(&(66.6666, 100.0), 1.0e-4)
+        );
+        assert!(curve.to().is_nearly_equal_to(&(100.0, 100.0), 1.0e-4));
+
+        let curve = Curve::smooth((0.0, 0.0), (1.0, 0.0), (0.0, 100.0), (-1.0, 0.0), None).unwrap();
+        assert_eq!(curve.categorize(), CurveCategory::CurvedParallel);
+        assert!(curve.from().is_nearly_equal_to(&(0.0, 0.0), 1.0e-4));
+        assert!(curve.from_param().is_nearly_equal_to(&(50.0, 0.0), 1.0e-4));
+        assert!(curve.to_param().is_nearly_equal_to(&(50.0, 100.0), 1.0e-4));
+        assert!(curve.to().is_nearly_equal_to(&(0.0, 100.0), 1.0e-4));
     }
 
     #[test]
