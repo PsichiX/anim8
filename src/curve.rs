@@ -1563,7 +1563,7 @@ where
         if self.length < EPSILON {
             return 0.0;
         }
-        distance = distance.clamp(0.0, self.length);
+        distance = distance.max(0.0).min(self.length);
         self.find_time_for(
             None,
             None,
@@ -1584,7 +1584,7 @@ where
         if dist.abs() < EPSILON {
             return Some(1.0);
         }
-        axis_value = axis_value.clamp(min, max);
+        axis_value = axis_value.max(min).min(max);
         let guess = (axis_value - min) / (max - min);
         Some(self.find_time_for(
             Some(guess),

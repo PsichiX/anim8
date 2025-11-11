@@ -528,7 +528,7 @@ where
     ) -> Option<usize> {
         let min = self.points.first().unwrap().point.get_axis(axis_index)?;
         let max = self.points.last().unwrap().point.get_axis(axis_index)?;
-        axis_value = axis_value.clamp(min, max);
+        axis_value = axis_value.max(min).min(max);
         let index = match self.points_distances_values.binary_search_by(|(_, value)| {
             value
                 .get_axis(axis_index)
@@ -550,7 +550,7 @@ where
 
     /// Finds time (factor) for given distance along the spline.
     pub fn find_time_for_distance(&self, mut distance: Scalar) -> Scalar {
-        distance = distance.clamp(0.0, self.length);
+        distance = distance.max(0.0).min(self.length);
         let index = match self
             .points_distances_values
             .binary_search_by(|(d, _)| d.partial_cmp(&distance).unwrap())
